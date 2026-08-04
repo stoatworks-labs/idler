@@ -157,6 +157,10 @@ Microsoft code, artwork or assets are used or included. The Flying Windows logo
 is a four-quad gesture toward the mark, not a reproduction of it, and 3D Pipes'
 teapot is generated from a profile curve rather than being Newell's dataset.
 
+<!-- attributions:start -->
+This project is built on other people's work — see [ATTRIBUTIONS.md](ATTRIBUTIONS.md).
+<!-- attributions:end -->
+
 ## Licence
 
 MIT. See [LICENSE](LICENSE).
