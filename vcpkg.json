@@ -1,0 +1,11 @@
+{
+  "name": "idler",
+  "version-string": "0.1.0",
+  "description": "Dependencies for building the Idler FFGL plugins. GLEW is only needed on Windows; macOS uses the system OpenGL framework.",
+  "dependencies": [
+    {
+      "name": "glew",
+      "platform": "!osx"
+    }
+  ]
+}

@@ -1,0 +1,820 @@
+/**
+    idtest -- the offline harness.
+
+    It drives **the real plugin class** through the real FFGL sequence in a
+    headless core-profile context. Not a reimplementation of the savers and not
+    a preview: the thing under test is `IdlerPlugin`, compiled from the same
+    objects that go into the bundles, and every number below comes out of a
+    frame it actually rendered.
+
+        --out PATH        render one frame
+        --sheet PATH      a contact sheet of all eleven savers
+        --list            parameters, with their types and defaults
+        --geometry        the mesh each saver builds, checked
+        --replay          the replay cache does not change the answer
+        --coverage        every saver draws something, at several times
+        --effect          the effect variant over a test clip
+
+    ## The three tests that matter, and what each one is blind to
+
+    **`--replay`** is the one that guards this plugin's central claim. 3D Pipes
+    and 3D Maze reach the frame you asked for by replaying from the seed, with
+    a cache to skip forward. The cache is an optimisation and must never change
+    the answer -- so this renders a frame cold, renders it again after running
+    the clock up to it, and requires the two to be **byte-identical**. A cache
+    that is merely nearly right passes every visual check and fails here.
+
+    It is blind to a saver being wrong in a way that is consistently wrong.
+
+    **`--geometry`** measures the mesh rather than the picture: triangle
+    counts, bounding boxes, and that every normal is unit length. Unit normals
+    are worth checking on their own because a zero-length one is a NaN once
+    normalised, and a single NaN normal poisons the lighting for the whole draw
+    call rather than for one triangle -- so the symptom is a saver that goes
+    black, with nothing to say why.
+
+    It is blind to anything that goes wrong after the mesh: the camera, the
+    shading, the compositing.
+
+    **`--coverage`** is the crude one and it earns its place. Every saver, at
+    several times, must put a non-trivial number of lit pixels on the frame. It
+    exists because the most likely way to break one of eleven savers is to make
+    it draw *nothing* -- an empty mesh, a camera looking the wrong way, a
+    degenerate scale -- and that failure is invisible in a repo where the
+    default saver still works.
+
+    None of them catches a dead control. See `tools/sweep.py`.
+*/
+
+#include <OpenGL/OpenGL.h>
+#include <OpenGL/gl3.h>
+#include <zlib.h>
+
+#include <algorithm>
+#include <cmath>
+#include <cstdio>
+#include <cstring>
+#include <map>
+#include <string>
+#include <vector>
+
+#include "Controls.h"
+#include "Idler.h"
+#include "Savers.h"
+
+using namespace idler;
+
+namespace
+{
+//---------------------------------------------------------------------------
+// A PNG writer. zlib ships with the OS, so this is a few chunk headers and a
+// CRC rather than a dependency.
+//---------------------------------------------------------------------------
+void putU32( std::vector< unsigned char >& out, uint32_t value )
+{
+	out.push_back( static_cast< unsigned char >( value >> 24 ) );
+	out.push_back( static_cast< unsigned char >( value >> 16 ) );
+	out.push_back( static_cast< unsigned char >( value >> 8 ) );
+	out.push_back( static_cast< unsigned char >( value ) );
+}
+
+void putChunk( std::vector< unsigned char >& out, const char* type, const std::vector< unsigned char >& data )
+{
+	putU32( out, static_cast< uint32_t >( data.size() ) );
+	const size_t start = out.size();
+	out.insert( out.end(), type, type + 4 );
+	out.insert( out.end(), data.begin(), data.end() );
+	uLong crc = crc32( 0L, Z_NULL, 0 );
+	crc       = crc32( crc, out.data() + start, static_cast< uInt >( 4 + data.size() ) );
+	putU32( out, static_cast< uint32_t >( crc ) );
+}
+
+bool writePng( const std::string& path, int width, int height, const std::vector< unsigned char >& rgba )
+{
+	std::vector< unsigned char > raw;
+	raw.reserve( static_cast< size_t >( height ) * ( 1 + static_cast< size_t >( width ) * 4 ) );
+	for( int y = 0; y < height; ++y )
+	{
+		raw.push_back( 0 );// filter: none
+		const unsigned char* row = rgba.data() + static_cast< size_t >( y ) * width * 4;
+		raw.insert( raw.end(), row, row + static_cast< size_t >( width ) * 4 );
+	}
+
+	uLongf compressedSize = compressBound( static_cast< uLong >( raw.size() ) );
+	std::vector< unsigned char > compressed( compressedSize );
+	if( compress2( compressed.data(), &compressedSize, raw.data(), static_cast< uLong >( raw.size() ), 6 ) != Z_OK )
+		return false;
+	compressed.resize( compressedSize );
+
+	std::vector< unsigned char > png = { 0x89, 'P', 'N', 'G', '\r', '\n', 0x1A, '\n' };
+
+	std::vector< unsigned char > ihdr;
+	putU32( ihdr, static_cast< uint32_t >( width ) );
+	putU32( ihdr, static_cast< uint32_t >( height ) );
+	ihdr.push_back( 8 );// bit depth
+	ihdr.push_back( 6 );// truecolour with alpha
+	ihdr.push_back( 0 );
+	ihdr.push_back( 0 );
+	ihdr.push_back( 0 );
+	putChunk( png, "IHDR", ihdr );
+	putChunk( png, "IDAT", compressed );
+	putChunk( png, "IEND", {} );
+
+	FILE* file = fopen( path.c_str(), "wb" );
+	if( file == nullptr )
+		return false;
+	const size_t written = fwrite( png.data(), 1, png.size(), file );
+	fclose( file );
+	return written == png.size();
+}
+
+//---------------------------------------------------------------------------
+// GL plumbing.
+//---------------------------------------------------------------------------
+CGLContextObj createContext()
+{
+	const CGLPixelFormatAttribute accelerated[] = {
+		kCGLPFAOpenGLProfile, static_cast< CGLPixelFormatAttribute >( kCGLOGLPVersion_GL4_Core ),
+		kCGLPFAAccelerated,
+		kCGLPFAColorSize, static_cast< CGLPixelFormatAttribute >( 24 ),
+		kCGLPFAAlphaSize, static_cast< CGLPixelFormatAttribute >( 8 ),
+		static_cast< CGLPixelFormatAttribute >( 0 )
+	};
+	const CGLPixelFormatAttribute software[] = {
+		kCGLPFAOpenGLProfile, static_cast< CGLPixelFormatAttribute >( kCGLOGLPVersion_GL4_Core ),
+		kCGLPFAColorSize, static_cast< CGLPixelFormatAttribute >( 24 ),
+		kCGLPFAAlphaSize, static_cast< CGLPixelFormatAttribute >( 8 ),
+		static_cast< CGLPixelFormatAttribute >( 0 )
+	};
+
+	CGLPixelFormatObj format = nullptr;
+	GLint formatCount        = 0;
+	if( CGLChoosePixelFormat( accelerated, &format, &formatCount ) != kCGLNoError || format == nullptr )
+	{
+		if( CGLChoosePixelFormat( software, &format, &formatCount ) != kCGLNoError || format == nullptr )
+			return nullptr;
+	}
+
+	CGLContextObj context = nullptr;
+	const CGLError error  = CGLCreateContext( format, nullptr, &context );
+	CGLDestroyPixelFormat( format );
+	if( error != kCGLNoError )
+		return nullptr;
+
+	CGLSetCurrentContext( context );
+	return context;
+}
+
+struct Surface
+{
+	GLuint texture = 0;
+	GLuint fbo     = 0;
+	int width      = 0;
+	int height     = 0;
+};
+
+Surface makeSurface( int width, int height )
+{
+	Surface surface;
+	surface.width  = width;
+	surface.height = height;
+
+	glGenTextures( 1, &surface.texture );
+	glBindTexture( GL_TEXTURE_2D, surface.texture );
+	glTexImage2D( GL_TEXTURE_2D, 0, GL_RGBA8, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr );
+	glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST );
+	glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST );
+	glBindTexture( GL_TEXTURE_2D, 0 );
+
+	glGenFramebuffers( 1, &surface.fbo );
+	glBindFramebuffer( GL_FRAMEBUFFER, surface.fbo );
+	glFramebufferTexture2D( GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, surface.texture, 0 );
+	return surface;
+}
+
+void releaseSurface( Surface& surface )
+{
+	if( surface.fbo != 0 )
+		glDeleteFramebuffers( 1, &surface.fbo );
+	if( surface.texture != 0 )
+		glDeleteTextures( 1, &surface.texture );
+	surface = Surface();
+}
+
+/// Straight out of GL, bottom row first.
+std::vector< unsigned char > readBytes( const Surface& surface )
+{
+	std::vector< unsigned char > pixels( static_cast< size_t >( surface.width ) * surface.height * 4 );
+	glBindFramebuffer( GL_FRAMEBUFFER, surface.fbo );
+	glPixelStorei( GL_PACK_ALIGNMENT, 1 );
+	glReadPixels( 0, 0, surface.width, surface.height, GL_RGBA, GL_UNSIGNED_BYTE, pixels.data() );
+	return pixels;
+}
+
+std::vector< unsigned char > flipRows( const std::vector< unsigned char >& image, int width, int height )
+{
+	std::vector< unsigned char > flipped( image.size() );
+	const size_t stride = static_cast< size_t >( width ) * 4;
+	for( int y = 0; y < height; ++y )
+		std::memcpy( flipped.data() + static_cast< size_t >( y ) * stride,
+		             image.data() + static_cast< size_t >( height - 1 - y ) * stride, stride );
+	return flipped;
+}
+
+/// A test clip for the effect: coloured quadrants over a gradient, so that a
+/// mask mode getting its geometry or its UV flip wrong is obvious rather than
+/// merely plausible.
+GLuint makeTestClip( int width, int height )
+{
+	std::vector< unsigned char > pixels( static_cast< size_t >( width ) * height * 4 );
+	for( int y = 0; y < height; ++y )
+		for( int x = 0; x < width; ++x )
+		{
+			const float u = static_cast< float >( x ) / static_cast< float >( width );
+			const float v = static_cast< float >( y ) / static_cast< float >( height );
+
+			unsigned char* p = &pixels[ ( static_cast< size_t >( y ) * width + x ) * 4 ];
+			p[ 0 ] = static_cast< unsigned char >( ( u < 0.5f ? 220.0f : 40.0f ) * ( 0.4f + 0.6f * v ) );
+			p[ 1 ] = static_cast< unsigned char >( ( v < 0.5f ? 200.0f : 60.0f ) * ( 0.4f + 0.6f * u ) );
+			p[ 2 ] = static_cast< unsigned char >( 255.0f * ( 0.3f + 0.7f * ( 1.0f - v ) ) );
+			p[ 3 ] = 255;
+		}
+
+	GLuint texture = 0;
+	glGenTextures( 1, &texture );
+	glBindTexture( GL_TEXTURE_2D, texture );
+	glTexImage2D( GL_TEXTURE_2D, 0, GL_RGBA8, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, pixels.data() );
+	glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR );
+	glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR );
+	glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE );
+	glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE );
+	glBindTexture( GL_TEXTURE_2D, 0 );
+	return texture;
+}
+
+//---------------------------------------------------------------------------
+// Parameters by name.
+//---------------------------------------------------------------------------
+std::map< std::string, unsigned int > parameterIndex( IdlerPlugin& plugin )
+{
+	std::map< std::string, unsigned int > byName;
+	for( unsigned int i = 0; i < plugin.GetNumParams(); ++i )
+	{
+		const char* name = plugin.GetParamName( i );
+		if( name != nullptr )
+			byName[ name ] = i;
+	}
+	return byName;
+}
+
+bool applySetting( IdlerPlugin& plugin, const std::string& assignment )
+{
+	const size_t equals = assignment.find( '=' );
+	if( equals == std::string::npos )
+	{
+		fprintf( stderr, "--set wants Name=value, got '%s'\n", assignment.c_str() );
+		return false;
+	}
+
+	const std::string name  = assignment.substr( 0, equals );
+	const std::string value = assignment.substr( equals + 1 );
+
+	const std::map< std::string, unsigned int > byName = parameterIndex( plugin );
+	const auto found                                   = byName.find( name );
+	if( found == byName.end() )
+	{
+		fprintf( stderr, "no parameter called '%s'\n", name.c_str() );
+		return false;
+	}
+
+	plugin.SetFloatParameter( found->second, std::stof( value ) );
+	return true;
+}
+
+//---------------------------------------------------------------------------
+// Rendering
+//---------------------------------------------------------------------------
+void render( IdlerPlugin& plugin, const Surface& surface, GLuint input = 0 )
+{
+	// A synthetic spectrum, written the way the host writes one. Without it the
+	// two Audio knobs measurably do nothing offline and the sweep would report
+	// them dead. A fixed shape rather than anything time-driven, so renders
+	// stay reproducible: bass-heavy like programme material.
+	for( unsigned int bin = 0; bin < kAudioBins; ++bin )
+	{
+		const float across = static_cast< float >( bin ) / static_cast< float >( kAudioBins - 1 );
+		const float level  = 0.7f * ( 1.0f - across ) * ( 1.0f - across ) +
+		                    0.2f * ( 0.5f + 0.5f * std::sin( 25.0f * across ) );
+		plugin.SetParamElementValue( PT_AUDIO, bin, level );
+	}
+
+	glBindFramebuffer( GL_FRAMEBUFFER, surface.fbo );
+	glViewport( 0, 0, surface.width, surface.height );
+	glClearColor( 0.0f, 0.0f, 0.0f, 0.0f );
+	glClear( GL_COLOR_BUFFER_BIT );
+
+	plugin.Render( surface.width, surface.height, input, 1.0f, 1.0f, surface.fbo );
+	glFinish();
+}
+
+bool prepare( IdlerPlugin& plugin, int width, int height )
+{
+	FFGLViewportStruct viewport{};
+	viewport.x      = 0;
+	viewport.y      = 0;
+	viewport.width  = static_cast< unsigned int >( width );
+	viewport.height = static_cast< unsigned int >( height );
+
+	if( plugin.InitGL( &viewport ) != FF_SUCCESS )
+	{
+		fprintf( stderr, "InitGL failed -- see the log\n" );
+		return false;
+	}
+	return true;
+}
+
+//---------------------------------------------------------------------------
+// Measuring
+//---------------------------------------------------------------------------
+
+/// Fraction of pixels with any visible content, and the mean luminance of
+/// those that have.
+struct Coverage
+{
+	double litFraction = 0.0;
+	double meanLuma    = 0.0;
+};
+
+Coverage measure( const std::vector< unsigned char >& pixels )
+{
+	size_t lit      = 0;
+	double luminance = 0.0;
+	const size_t count = pixels.size() / 4;
+
+	for( size_t i = 0; i < count; ++i )
+	{
+		const unsigned char* p = &pixels[ i * 4 ];
+		const double l = ( 0.2126 * p[ 0 ] + 0.7152 * p[ 1 ] + 0.0722 * p[ 2 ] ) / 255.0;
+		if( p[ 3 ] > 4 && l > 0.02 )
+		{
+			++lit;
+			luminance += l;
+		}
+	}
+
+	Coverage coverage;
+	coverage.litFraction = count > 0 ? static_cast< double >( lit ) / static_cast< double >( count ) : 0.0;
+	coverage.meanLuma    = lit > 0 ? luminance / static_cast< double >( lit ) : 0.0;
+	return coverage;
+}
+
+//---------------------------------------------------------------------------
+// The tests
+//---------------------------------------------------------------------------
+
+/// Every saver, at several times, must draw something.
+bool runCoverage( int width, int height )
+{
+	Surface surface = makeSurface( width, height );
+
+	IdlerPlugin plugin( false );
+	if( !prepare( plugin, width, height ) )
+		return false;
+
+	// Times chosen to be awkward. Zero because a saver that only works once the
+	// clock has run is broken for anyone triggering a clip; a long one because
+	// the growing savers must have cleared and restarted by then.
+	const float times[] = { 0.0f, 0.37f, 7.5f, 63.25f, 240.0f };
+
+	bool ok = true;
+
+	for( int saver = 0; saver < static_cast< int >( SaverKind::Count ); ++saver )
+	{
+		plugin.SetFloatParameter( PT_SAVER, static_cast< float >( saver ) );
+
+		// Each saver gets its own preset, which is where its scene controls are
+		// set to something that suits it. Testing all eleven on Mystify's
+		// defaults would prove very little.
+		plugin.SetFloatParameter( PT_PRESET, static_cast< float >( saver + 1 ) );
+
+		for( float when : times )
+		{
+			plugin.SetTimeOverride( when );
+			render( plugin, surface );
+
+			const Coverage coverage = measure( readBytes( surface ) );
+			const size_t triangles = plugin.LastScene().mesh.TriangleCount();
+
+			// The bar is literally zero, and deliberately so. An earlier
+			// version wanted a tenth of a percent of the frame and failed 3D
+			// Pipes at t = 0 -- where a network two cells long really is a few
+			// dozen pixels, because the saver starts empty and grows, which is
+			// what it did on the machine. The operator's answer to wanting it
+			// part-grown on trigger is the Phase offset, not a saver that
+			// cheats. So what is checked here is the failure that is actually a
+			// failure: a saver that emits no geometry, or emits geometry that
+			// lands nowhere.
+			const bool drewSomething = triangles > 0 && coverage.litFraction > 0.0;
+
+			printf( "%-22s t=%7.2f  lit %6.2f%%  luma %.3f  tris %7zu  %s\n",
+			        SaverName( static_cast< SaverKind >( saver ) ), when,
+			        coverage.litFraction * 100.0, coverage.meanLuma, triangles,
+			        drewSomething ? "ok" : "DREW NOTHING" );
+
+			if( !drewSomething )
+				ok = false;
+		}
+	}
+
+	plugin.DeInitGL();
+	releaseSurface( surface );
+	return ok;
+}
+
+/// The mesh each saver builds, checked without looking at the picture.
+bool runGeometry( int width, int height )
+{
+	Surface surface = makeSurface( width, height );
+
+	IdlerPlugin plugin( false );
+	if( !prepare( plugin, width, height ) )
+		return false;
+
+	bool ok = true;
+
+	for( int saver = 0; saver < static_cast< int >( SaverKind::Count ); ++saver )
+	{
+		plugin.SetFloatParameter( PT_SAVER, static_cast< float >( saver ) );
+		plugin.SetFloatParameter( PT_PRESET, static_cast< float >( saver + 1 ) );
+		plugin.SetTimeOverride( 11.5f );
+		render( plugin, surface );
+
+		const Mesh& mesh = plugin.LastScene().mesh;
+
+		// Indices in range. An out-of-range index is undefined behaviour in the
+		// draw and usually reads as random triangles flying off the frame.
+		bool indicesValid = true;
+		for( uint32_t index : mesh.indices )
+			if( index >= mesh.vertices.size() )
+			{
+				indicesValid = false;
+				break;
+			}
+
+		// Every normal unit length. A zero-length normal becomes a NaN once
+		// normalised, and one NaN normal takes the lighting of the whole draw
+		// call with it -- so the symptom is a saver that goes black with
+		// nothing to say why.
+		int badNormals   = 0;
+		int nonFinite    = 0;
+		Vec3 low{ 1e30f, 1e30f, 1e30f };
+		Vec3 high{ -1e30f, -1e30f, -1e30f };
+
+		for( const Vertex& v : mesh.vertices )
+		{
+			const float length = Length( v.normal );
+			if( !( std::fabs( length - 1.0f ) < 0.02f ) )
+				++badNormals;
+
+			if( !std::isfinite( v.position.x ) || !std::isfinite( v.position.y ) ||
+			    !std::isfinite( v.position.z ) )
+			{
+				++nonFinite;
+				continue;
+			}
+
+			low  = { std::min( low.x, v.position.x ), std::min( low.y, v.position.y ), std::min( low.z, v.position.z ) };
+			high = { std::max( high.x, v.position.x ), std::max( high.y, v.position.y ), std::max( high.z, v.position.z ) };
+		}
+
+		const bool pass = indicesValid && badNormals == 0 && nonFinite == 0 && !mesh.Empty();
+
+		printf( "%-22s tris %7zu  verts %7zu  bbox [%.2f %.2f %.2f]..[%.2f %.2f %.2f]  %s\n",
+		        SaverName( static_cast< SaverKind >( saver ) ), mesh.TriangleCount(), mesh.vertices.size(),
+		        low.x, low.y, low.z, high.x, high.y, high.z, pass ? "ok" : "FAIL" );
+
+		if( !indicesValid )
+			printf( "    index out of range\n" );
+		if( badNormals != 0 )
+			printf( "    %d normals are not unit length\n", badNormals );
+		if( nonFinite != 0 )
+			printf( "    %d non-finite positions\n", nonFinite );
+		if( mesh.Empty() )
+			printf( "    empty mesh\n" );
+
+		ok = ok && pass;
+	}
+
+	plugin.DeInitGL();
+	releaseSurface( surface );
+	return ok;
+}
+
+/**
+    The replay cache must not change the answer.
+
+    A frame rendered cold and the same frame reached by running the clock up to
+    it have to be **byte-identical**. Anything less means the cache is a second
+    implementation of the growth, and a cache that is nearly right passes every
+    visual check there is.
+
+    Only the two growing savers have a cache; the other nine are run anyway,
+    because a saver that quietly acquires state is exactly the regression this
+    would otherwise miss.
+*/
+bool runReplay( int width, int height )
+{
+	Surface surface = makeSurface( width, height );
+
+	IdlerPlugin plugin( false );
+	if( !prepare( plugin, width, height ) )
+		return false;
+
+	constexpr float kTarget = 43.5f;
+
+	bool ok = true;
+
+	for( int saver = 0; saver < static_cast< int >( SaverKind::Count ); ++saver )
+	{
+		plugin.SetFloatParameter( PT_SAVER, static_cast< float >( saver ) );
+		plugin.SetFloatParameter( PT_PRESET, static_cast< float >( saver + 1 ) );
+
+		// Cold: nothing has been rendered at any other time.
+		plugin.InvalidateReplay();
+		plugin.SetTimeOverride( kTarget );
+		render( plugin, surface );
+		const std::vector< unsigned char > cold = readBytes( surface );
+
+		// Warm: walk the clock up to the same instant, so the cache is carried
+		// forward the whole way.
+		plugin.InvalidateReplay();
+		for( float when = 0.0f; when < kTarget; when += 0.25f )
+		{
+			plugin.SetTimeOverride( when );
+			render( plugin, surface );
+		}
+		plugin.SetTimeOverride( kTarget );
+		render( plugin, surface );
+		const std::vector< unsigned char > warm = readBytes( surface );
+
+		size_t differing = 0;
+		for( size_t i = 0; i < cold.size() && i < warm.size(); ++i )
+			if( cold[ i ] != warm[ i ] )
+				++differing;
+
+		const bool identical = ( differing == 0 );
+		printf( "%-22s cold vs warm: %s%s\n", SaverName( static_cast< SaverKind >( saver ) ),
+		        identical ? "identical" : "DIFFER",
+		        identical ? "" : ( "  (" + std::to_string( differing ) + " bytes)" ).c_str() );
+
+		ok = ok && identical;
+	}
+
+	plugin.DeInitGL();
+	releaseSurface( surface );
+	return ok;
+}
+
+/// A contact sheet: every saver, one tile each, on its own preset.
+bool runSheet( const std::string& path, int tileWidth, int tileHeight )
+{
+	const int columns = 4;
+	const int rows    = ( static_cast< int >( SaverKind::Count ) + columns - 1 ) / columns;
+
+	const int sheetWidth  = tileWidth * columns;
+	const int sheetHeight = tileHeight * rows;
+
+	Surface surface = makeSurface( tileWidth, tileHeight );
+
+	IdlerPlugin plugin( false );
+	if( !prepare( plugin, tileWidth, tileHeight ) )
+		return false;
+
+	std::vector< unsigned char > sheet( static_cast< size_t >( sheetWidth ) * sheetHeight * 4, 0 );
+
+	for( int saver = 0; saver < static_cast< int >( SaverKind::Count ); ++saver )
+	{
+		plugin.SetFloatParameter( PT_SAVER, static_cast< float >( saver ) );
+		plugin.SetFloatParameter( PT_PRESET, static_cast< float >( saver + 1 ) );
+		plugin.SetTimeOverride( 18.0f );
+		render( plugin, surface );
+
+		const std::vector< unsigned char > tile = flipRows( readBytes( surface ), tileWidth, tileHeight );
+
+		const int column = saver % columns;
+		const int row    = saver / columns;
+
+		for( int y = 0; y < tileHeight; ++y )
+		{
+			const size_t source = static_cast< size_t >( y ) * tileWidth * 4;
+			const size_t destination =
+				( ( static_cast< size_t >( row * tileHeight + y ) ) * sheetWidth + column * tileWidth ) * 4;
+			std::memcpy( sheet.data() + destination, tile.data() + source,
+			             static_cast< size_t >( tileWidth ) * 4 );
+		}
+
+		printf( "tile %2d  %s\n", saver, SaverName( static_cast< SaverKind >( saver ) ) );
+	}
+
+	plugin.DeInitGL();
+	releaseSurface( surface );
+
+	if( !writePng( path, sheetWidth, sheetHeight, sheet ) )
+	{
+		fprintf( stderr, "could not write %s\n", path.c_str() );
+		return false;
+	}
+	printf( "wrote %s (%dx%d)\n", path.c_str(), sheetWidth, sheetHeight );
+	return true;
+}
+
+void usage()
+{
+	printf(
+		"idtest -- the Idler offline harness\n"
+		"\n"
+		"  --out PATH        render one frame\n"
+		"  --sheet PATH      a contact sheet of all eleven savers\n"
+		"  --list            parameters, with their types and defaults\n"
+		"  --geometry        the mesh each saver builds, checked\n"
+		"  --replay          the replay cache does not change the answer\n"
+		"  --coverage        every saver draws something, at several times\n"
+		"  --effect          render the effect variant over a test clip\n"
+		"\n"
+		"  --time SECONDS    pin the clock (default 12)\n"
+		"  --hosttime SEC    drive the real clock instead of pinning\n"
+		"  --size WxH        render size (default 960x540)\n"
+		"  --saver N         which saver, by index\n"
+		"  --preset N        apply factory preset N (1-based)\n"
+		"  --set Name=value  any parameter, by its host name\n" );
+}
+} // namespace
+
+int main( int argc, char** argv )
+{
+	std::string outPath;
+	std::string sheetPath;
+	bool wantList     = false;
+	bool wantGeometry = false;
+	bool wantReplay   = false;
+	bool wantCoverage = false;
+	bool wantEffect   = false;
+
+	float time  = 12.0f;
+	// Drive the REAL host clock instead of pinning the time.
+	//
+	// Pinning replaces the clock, which is exactly what most tests want -- but
+	// it also means Speed, the millisecond-vs-seconds normalisation and the
+	// audio integration are all bypassed, so they look dead to a sweep that
+	// only ever pins. This renders two frames a frame-interval apart, which is
+	// the minimum that gives the clock a delta to work with.
+	bool useHostClock = false;
+	int width   = 960;
+	int height  = 540;
+	int saver   = -1;
+	int preset  = -1;
+	std::vector< std::string > settings;
+
+	for( int i = 1; i < argc; ++i )
+	{
+		const std::string argument = argv[ i ];
+		auto next                  = [ & ]() -> std::string { return ( i + 1 < argc ) ? argv[ ++i ] : std::string(); };
+
+		if( argument == "--out" )
+			outPath = next();
+		else if( argument == "--sheet" )
+			sheetPath = next();
+		else if( argument == "--list" )
+			wantList = true;
+		else if( argument == "--geometry" )
+			wantGeometry = true;
+		else if( argument == "--replay" )
+			wantReplay = true;
+		else if( argument == "--coverage" )
+			wantCoverage = true;
+		else if( argument == "--effect" )
+			wantEffect = true;
+		else if( argument == "--time" )
+			time = std::stof( next() );
+		else if( argument == "--hosttime" )
+		{
+			time         = std::stof( next() );
+			useHostClock = true;
+		}
+		else if( argument == "--saver" )
+			saver = std::stoi( next() );
+		else if( argument == "--preset" )
+			preset = std::stoi( next() );
+		else if( argument == "--set" )
+			settings.push_back( next() );
+		else if( argument == "--size" )
+		{
+			const std::string size = next();
+			const size_t cross     = size.find( 'x' );
+			if( cross != std::string::npos )
+			{
+				width  = std::stoi( size.substr( 0, cross ) );
+				height = std::stoi( size.substr( cross + 1 ) );
+			}
+		}
+		else
+		{
+			usage();
+			return argument == "--help" ? 0 : 1;
+		}
+	}
+
+	if( outPath.empty() && sheetPath.empty() && !wantList && !wantGeometry && !wantReplay && !wantCoverage )
+	{
+		usage();
+		return 1;
+	}
+
+	CGLContextObj context = createContext();
+	if( context == nullptr )
+	{
+		fprintf( stderr, "could not create an OpenGL 4.1 core context\n" );
+		return 1;
+	}
+
+	int status = 0;
+
+	if( wantList )
+	{
+		IdlerPlugin plugin( false );
+		for( unsigned int i = 0; i < plugin.GetNumParams(); ++i )
+			printf( "%3u  %-22s type %2u  default %.4f\n", i,
+			        plugin.GetParamName( i ) ? plugin.GetParamName( i ) : "?",
+			        plugin.GetParamType( i ), plugin.GetFloatParameter( i ) );
+	}
+
+	if( wantGeometry && status == 0 )
+		status = runGeometry( width, height ) ? 0 : 1;
+
+	if( wantCoverage && status == 0 )
+		status = runCoverage( width, height ) ? 0 : 1;
+
+	if( wantReplay && status == 0 )
+		status = runReplay( width, height ) ? 0 : 1;
+
+	if( !sheetPath.empty() && status == 0 )
+		status = runSheet( sheetPath, 480, 270 ) ? 0 : 1;
+
+	if( !outPath.empty() && status == 0 )
+	{
+		Surface surface = makeSurface( width, height );
+
+		IdlerPlugin plugin( wantEffect );
+		if( !prepare( plugin, width, height ) )
+			status = 1;
+		else
+		{
+			if( saver >= 0 )
+				plugin.SetFloatParameter( PT_SAVER, static_cast< float >( saver ) );
+			if( preset >= 0 )
+				plugin.SetFloatParameter( PT_PRESET, static_cast< float >( preset ) );
+			for( const std::string& setting : settings )
+				if( !applySetting( plugin, setting ) )
+					status = 1;
+
+			const GLuint clip = wantEffect ? makeTestClip( width, height ) : 0;
+
+			if( useHostClock )
+			{
+				// Two frames, so UpdateClock has a delta to decide its units
+				// from and UpdateAudio has one to filter over.
+				plugin.SetTime( static_cast< double >( time ) - 1.0 / 30.0 );
+				render( plugin, surface, clip );
+				plugin.SetTime( static_cast< double >( time ) );
+				render( plugin, surface, clip );
+			}
+			else
+			{
+				plugin.SetTimeOverride( time );
+				render( plugin, surface, clip );
+			}
+
+			const std::vector< unsigned char > pixels = flipRows( readBytes( surface ), width, height );
+			if( !writePng( outPath, width, height, pixels ) )
+			{
+				fprintf( stderr, "could not write %s\n", outPath.c_str() );
+				status = 1;
+			}
+			else
+			{
+				const Coverage coverage = measure( pixels );
+				printf( "wrote %s (%dx%d)  lit %.2f%%  tris %zu\n", outPath.c_str(), width, height,
+				        coverage.litFraction * 100.0, plugin.LastScene().mesh.TriangleCount() );
+			}
+
+			if( clip != 0 )
+				glDeleteTextures( 1, &clip );
+			plugin.DeInitGL();
+		}
+
+		releaseSurface( surface );
+	}
+
+	CGLDestroyContext( context );
+	return status;
+}
