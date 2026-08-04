@@ -35,7 +35,43 @@ Ships as two plugins: **Idler**, a source, and **Idler Mask**, an effect that
 draws the saver over the incoming clip — or reveals, hides or tints the clip
 through it.
 
+[![Idler — the Windows 95/98 screensavers, rebuilt for Resolume](docs/video-thumb.png)](https://www.youtube.com/watch?v=r_ZPnHM8-NY)
+
+*[Watch the tour](https://www.youtube.com/watch?v=r_ZPnHM8-NY) — 58 seconds, all
+eleven savers. Every frame is the real plugin: an FFGL plugin has no window, so
+the footage is rendered by the plugin's own harness from a cue sheet in this
+repo (`tools/video.cues`), not filmed off a screen.*
+
 <!-- downloads:start -->
+
+## Download
+
+**[v0.1.0](https://github.com/stoatworks-labs/idler/releases/tag/v0.1.0)** — prebuilt for macOS and Windows. Pick your platform:
+
+<details>
+<summary><b>macOS</b> — Universal (Apple Silicon + Intel)</summary>
+
+| Build | Download | Size |
+| --- | --- | --- |
+| Universal (Apple Silicon + Intel) · .dmg disk image | [`idler-0.1.0-macos-universal.dmg`](https://github.com/stoatworks-labs/idler/releases/download/v0.1.0/idler-0.1.0-macos-universal.dmg) | 826 KB |
+| Universal (Apple Silicon + Intel) · .zip archive | [`idler-macos-universal.zip`](https://github.com/stoatworks-labs/idler/releases/latest/download/idler-macos-universal.zip) | 487 KB |
+
+</details>
+
+<details>
+<summary><b>Windows</b> — x64</summary>
+
+| Build | Download | Size |
+| --- | --- | --- |
+| x64 · .exe installer | [`idler-0.1.0-windows-x86_64-setup.exe`](https://github.com/stoatworks-labs/idler/releases/download/v0.1.0/idler-0.1.0-windows-x86_64-setup.exe) | 260 KB |
+| x64 · .zip archive | [`idler-windows-x86_64.zip`](https://github.com/stoatworks-labs/idler/releases/latest/download/idler-windows-x86_64.zip) | 307 KB |
+
+</details>
+
+All builds, checksums and release notes: [github.com/stoatworks-labs/idler/releases](https://github.com/stoatworks-labs/idler/releases).
+
+The Windows builds are unsigned, so SmartScreen warns once.
+
 <!-- downloads:end -->
 
 ## Why it is not just nostalgia
