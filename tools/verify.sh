@@ -209,6 +209,52 @@ else
 fi
 
 #-----------------------------------------------------------------------------
+step "browser demo"
+#-----------------------------------------------------------------------------
+# demo/ is a hand-written port of this plugin for idler-demo.stoatworks-labs.com.
+# Two things can rot in it, and they rot silently:
+#
+#   - the two shader programs are COPIED from source/Shaders.cpp, so a change
+#     here that is not mirrored there leaves the demo running different GLSL;
+#   - the 3D engine and the eleven savers are a HAND PORT, which is a second
+#     implementation of everything this repo actually does.
+#
+# check_geometry.mjs is the one that matters. It drives the ported savers under
+# exactly the conditions `idtest --geometry` uses and compares the same three
+# numbers, so a mis-ported loop bound or a conversion curve that has drifted
+# fails here rather than being noticed as "the demo looks a bit different".
+if [ -d demo ]; then
+	if python3 demo/tools/check_shaders.py > /tmp/idler-shaders.txt 2>&1; then
+		ok "demo shaders identical to source/Shaders.cpp"
+	else
+		bad "demo shaders have drifted -- see /tmp/idler-shaders.txt"
+	fi
+
+	if command -v node > /dev/null 2>&1; then
+		if node demo/tools/check_geometry.mjs > /tmp/idler-geometry.txt 2>&1; then
+			ok "ported savers match idtest --geometry"
+		else
+			bad "ported savers differ from the plugin -- see /tmp/idler-geometry.txt"
+		fi
+	else
+		printf '   --    node not installed, skipping the ported-saver check\n'
+	fi
+
+	# The kit is vendored from stoatworks-backend and must never be edited in
+	# place; a fix applied to one copy is a fix the other ten silently lack.
+	SYNC="$HOME/Projects/stoatworks-backend/resolume-demo/sync.sh"
+	if [ -x "$SYNC" ]; then
+		if "$SYNC" --check idler > /dev/null 2>&1; then
+			ok "demo/vendor matches the shared kit"
+		else
+			bad "demo/vendor has drifted from stoatworks-backend/resolume-demo"
+		fi
+	else
+		printf '   --    resolume-demo/sync.sh not present, skipping the kit check\n'
+	fi
+fi
+
+#-----------------------------------------------------------------------------
 step "contact sheet"
 #-----------------------------------------------------------------------------
 # Asserts nothing, and is still worth regenerating after any change to a saver.
