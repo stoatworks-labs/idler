@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <cstdint>
 #include <vector>
 
@@ -38,6 +39,21 @@
 */
 namespace idler
 {
+
+/**
+    Wireframe line half-width in pixels, from the Line Width control.
+
+    Scaled off the short edge so a wireframe keeps its weight between a preview
+    render and a 4K output. It lives here rather than in the renderer because
+    there are now two renderers -- the GL one in Idler.cpp and the software one
+    the OFX build uses -- and a wireframe that is a different weight in Resolve
+    than in Resolume is exactly the kind of divergence a shared `Scene` exists
+    to prevent.
+*/
+inline float EdgeWidthPixels( float lineWidth, int width, int height )
+{
+	return 0.5f + lineWidth * 3.0f * static_cast< float >( std::min( width, height ) ) / 1080.0f;
+}
 
 /// Position, normal, colour. One interleaved buffer.
 ///

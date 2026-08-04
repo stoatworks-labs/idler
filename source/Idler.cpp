@@ -743,10 +743,8 @@ void IdlerPlugin::Render( int width, int height, GLuint inputTexture, float maxU
 		sceneShader.Set( "LightDirection", scene.lightDirection.x, scene.lightDirection.y, scene.lightDirection.z );
 		sceneShader.Set( "Ambient", scene.ambient );
 		sceneShader.Set( "FogRange", scene.fogStart, scene.fogEnd );
-		// In pixels, scaled off the short edge so a wireframe keeps its weight
-		// between a preview render and a 4K output.
-		sceneShader.Set( "EdgeWidth",
-		                 0.5f + settings.lineWidth * 3.0f * static_cast< float >( std::min( width, height ) ) / 1080.0f );
+		lastEdgeWidth = EdgeWidthPixels( settings.lineWidth, width, height );
+		sceneShader.Set( "EdgeWidth", lastEdgeWidth );
 
 		glBindVertexArray( vertexArray );
 		glDrawElements( GL_TRIANGLES, static_cast< GLsizei >( indexScratch.size() ), GL_UNSIGNED_INT, nullptr );

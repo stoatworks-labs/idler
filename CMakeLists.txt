@@ -164,7 +164,10 @@ idler_add_plugin(IdlerEffect source/EffectPlugin.cpp
 # headless core-profile context. See tools/idtest.
 # ---------------------------------------------------------------------------
 if(IDLER_BUILD_TOOLS AND APPLE AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tools/idtest/main.cpp")
-    add_executable(idtest tools/idtest/main.cpp)
+    # Raster.cpp is compiled into the harness as well as into the OFX bundle,
+    # so `idtest --raster` measures the same rasteriser Resolve will run rather
+    # than a copy of it. That is the whole point of the check.
+    add_executable(idtest tools/idtest/main.cpp source/ofx/Raster.cpp)
     # zlib ships with the OS, which is why the PNG writer is fifty lines here
     # rather than a vendored dependency.
     target_link_libraries(idtest PRIVATE idler_core z

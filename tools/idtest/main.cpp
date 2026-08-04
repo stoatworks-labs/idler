@@ -60,6 +60,7 @@
 
 #include "Controls.h"
 #include "Idler.h"
+#include "ofx/Raster.h"
 #include "Savers.h"
 
 using namespace idler;
@@ -833,6 +834,152 @@ int renderSequence( const std::string& directory, const std::string& cuePath, in
 	return 0;
 }
 
+/**
+    Every saver through BOTH renderers, compared.
+
+    The OFX build cannot use the GL path -- an OFX host hands over a buffer and
+    most of them never offer a context -- so it rasterises `Scene` in software.
+    Two renderers for one plugin is a divergence waiting to happen, and the
+    divergence people would actually hit is a preset that looks right in
+    Resolume and wrong in Resolve.
+
+    This does not demand identical pixels, and could not: a GPU's fill rule,
+    its interpolation precision and its `fwidth` are all its own. What it
+    demands is that the two agree about the PICTURE -- where the geometry
+    landed, and roughly how bright it is. Coverage disagreement is the sharp
+    test (a wrong matrix, a flipped y, a missing near clip all show up as
+    coverage in the wrong pixels), and mean channel error catches shading that
+    drifted.
+*/
+bool rasterCheck( int width, int height, const std::string& sheetPath )
+{
+	Surface surface = makeSurface( width, height );
+
+	IdlerPlugin plugin( false );
+	if( !prepare( plugin, width, height ) )
+		return false;
+
+	const size_t pixels = static_cast< size_t >( width ) * static_cast< size_t >( height );
+	std::vector< float > software( pixels * 4 );
+
+	bool ok = true;
+
+	// A number agreeing with a number is not evidence that either is a picture.
+	// Every real bug in this plugin was found by looking at a contact sheet, so
+	// --raster can write one: GL on the left of each pair, software on the
+	// right. If the software column were blank, every coverage figure above
+	// would still read 100%.
+	const int tileW  = width;
+	const int tileH  = height;
+	const int sheetW = tileW * 2;
+	const int sheetH = tileH * static_cast< int >( SaverKind::Count );
+	std::vector< unsigned char > sheet;
+	if( !sheetPath.empty() )
+		sheet.assign( static_cast< size_t >( sheetW ) * sheetH * 4, 0 );
+
+	printf( "%-22s  coverage  mean err  max err\n", "saver" );
+
+	for( int saver = 0; saver < static_cast< int >( SaverKind::Count ); ++saver )
+	{
+		plugin.SetFloatParameter( PT_SAVER, static_cast< float >( saver ) );
+		plugin.SetFloatParameter( PT_PRESET, static_cast< float >( saver + 1 ) );
+		plugin.SetTimeOverride( 11.5f );
+		render( plugin, surface );
+
+		// The GL readback is the composite pass's output, which for the source
+		// plugin with Mix at 1 is the scene target unchanged -- so it is the
+		// scene render being compared, not the compositor.
+		const std::vector< unsigned char > gl = readBytes( surface );
+
+		Rasterise( plugin.LastScene(), software.data(), width, height, plugin.LastEdgeWidth() );
+
+		double sum        = 0.0;
+		double worst      = 0.0;
+		size_t disagree   = 0;
+		size_t litEither  = 0;
+
+		for( size_t i = 0; i < pixels; ++i )
+		{
+			// readBytes gives rows bottom-up, as GL stores them; the software
+			// buffer is top-down. Comparing them without this flip produces a
+			// beautifully symmetrical failure on savers that happen to be
+			// symmetrical, which is most of them.
+			const size_t x       = i % static_cast< size_t >( width );
+			const size_t y       = i / static_cast< size_t >( width );
+			const size_t flipped = ( static_cast< size_t >( height ) - 1 - y )
+			                       * static_cast< size_t >( width ) + x;
+
+			for( int c = 0; c < 4; ++c )
+			{
+				const double a = gl[ flipped * 4 + c ] / 255.0;
+				const double b = software[ i * 4 + c ];
+				const double d = std::fabs( a - b );
+				sum += d;
+				worst = std::max( worst, d );
+			}
+
+			const bool glLit = gl[ flipped * 4 + 3 ] > 8;
+			const bool swLit = software[ i * 4 + 3 ] > 8.0f / 255.0f;
+			if( glLit || swLit )
+				++litEither;
+			if( glLit != swLit )
+				++disagree;
+		}
+
+		if( !sheet.empty() )
+		{
+			for( size_t i = 0; i < pixels; ++i )
+			{
+				const size_t x       = i % static_cast< size_t >( width );
+				const size_t y       = i / static_cast< size_t >( width );
+				const size_t flipped = ( static_cast< size_t >( height ) - 1 - y )
+				                       * static_cast< size_t >( width ) + x;
+				const size_t row     = static_cast< size_t >( saver ) * tileH + y;
+
+				unsigned char* left = sheet.data() + ( row * sheetW + x ) * 4;
+				for( int c = 0; c < 4; ++c )
+					left[ c ] = gl[ flipped * 4 + c ];
+
+				unsigned char* right = sheet.data() + ( row * sheetW + tileW + x ) * 4;
+				for( int c = 0; c < 4; ++c )
+				{
+					const float v = software[ i * 4 + c ];
+					right[ c ] = static_cast< unsigned char >(
+					    std::min( std::max( v, 0.0f ), 1.0f ) * 255.0f + 0.5f );
+				}
+			}
+		}
+
+		const double mean     = sum / static_cast< double >( pixels * 4 );
+		const double coverage = litEither == 0 ? 1.0
+		                                       : 1.0 - static_cast< double >( disagree )
+		                                                   / static_cast< double >( litEither );
+
+		// Thresholds set from what the two actually do, not from hope. Edge
+		// pixels differ on every triangle, so a saver made of thin lines has a
+		// larger honest disagreement than one made of solids.
+		const bool pass = coverage > 0.90 && mean < 0.02;
+		if( !pass )
+			ok = false;
+
+		printf( "%-22s  %6.1f%%  %8.4f  %7.4f  %s\n", SaverName( static_cast< SaverKind >( saver ) ),
+		        coverage * 100.0, mean, worst, pass ? "ok" : "MISMATCH" );
+	}
+
+	if( !sheet.empty() )
+	{
+		if( writePng( sheetPath.c_str(), sheetW, sheetH, sheet ) )
+			printf( "\nwrote %s (GL left, software right)\n", sheetPath.c_str() );
+		else
+			printf( "\ncould not write %s\n", sheetPath.c_str() );
+	}
+
+	releaseSurface( surface );
+	plugin.DeInitGL();
+	printf( "\n%s\n", ok ? "GL and software renderers agree" : "renderers DISAGREE" );
+	return ok;
+}
+
 void usage()
 {
 	printf(
@@ -844,6 +991,8 @@ void usage()
 		"  --geometry        the mesh each saver builds, checked\n"
 		"  --replay          the replay cache does not change the answer\n"
 		"  --coverage        every saver draws something, at several times\n"
+		"  --raster          the software rasteriser agrees with the GL one\n"
+		"  --raster-sheet P  and write a GL-vs-software comparison sheet\n"
 		"  --effect          render the effect variant over a test clip\n"
 		"\n"
         "  --sequence DIR    render a cue sheet to numbered PNGs (the video)\n"
@@ -867,6 +1016,8 @@ int main( int argc, char** argv )
 	std::string sheetPath;
 	bool wantList     = false;
 	bool wantGeometry = false;
+	bool wantRaster   = false;
+	std::string rasterSheet;
 	bool wantReplay   = false;
 	bool wantCoverage = false;
 	bool wantEffect   = false;
@@ -904,6 +1055,10 @@ int main( int argc, char** argv )
 			wantList = true;
 		else if( argument == "--geometry" )
 			wantGeometry = true;
+		else if( argument == "--raster" )
+			wantRaster = true;
+		else if( argument == "--raster-sheet" )
+			rasterSheet = next();
 		else if( argument == "--replay" )
 			wantReplay = true;
 		else if( argument == "--coverage" )
@@ -951,7 +1106,7 @@ int main( int argc, char** argv )
 	}
 
 	if( outPath.empty() && sheetPath.empty() && sequenceDir.empty() && !wantList && !wantGeometry &&
-	    !wantReplay && !wantCoverage )
+	    !wantReplay && !wantCoverage && !wantRaster )
 	{
 		usage();
 		return 1;
@@ -981,6 +1136,9 @@ int main( int argc, char** argv )
 		CGLDestroyContext( context );
 		return status;
 	}
+
+	if( wantRaster && status == 0 )
+		status = rasterCheck( width, height, rasterSheet ) ? 0 : 1;
 
 	if( wantGeometry && status == 0 )
 		status = runGeometry( width, height ) ? 0 : 1;

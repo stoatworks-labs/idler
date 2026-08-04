@@ -82,6 +82,11 @@ public:
 	/// length.
 	const Scene& LastScene() const { return scene; }
 
+	/// The wireframe edge width the last render actually used, in pixels. The
+	/// software rasteriser is handed this rather than recomputing it, so
+	/// `idtest --raster` compares two renderers and not two derivations.
+	float LastEdgeWidth() const { return lastEdgeWidth; }
+
 	/// Pin the driven time, ignoring the host clock and the beat.
 	///
 	/// The harness needs this because a test that renders "the frame at 84.5
@@ -165,6 +170,7 @@ private:
 	SaverKind saverKind = SaverKind::Count;///< Count = "none built yet"
 
 	Scene scene;
+	float lastEdgeWidth = 1.0f;
 	std::vector< float > uploadBuffer;
 	std::vector< uint32_t > indexScratch;
 
