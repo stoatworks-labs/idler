@@ -53,8 +53,8 @@ repo (`tools/video.cues`), not filmed off a screen.*
 
 | Build | Download | Size |
 | --- | --- | --- |
-| Universal (Apple Silicon + Intel) · .dmg disk image | [`idler-0.1.0-macos-universal.dmg`](https://github.com/stoatworks-labs/idler/releases/download/v0.1.0/idler-0.1.0-macos-universal.dmg) | 826 KB |
-| Universal (Apple Silicon + Intel) · .zip archive | [`idler-macos-universal.zip`](https://github.com/stoatworks-labs/idler/releases/latest/download/idler-macos-universal.zip) | 487 KB |
+| Universal (Apple Silicon + Intel) · .dmg disk image | [`idler-0.1.0-macos-universal.dmg`](https://github.com/stoatworks-labs/idler/releases/download/v0.1.0/idler-0.1.0-macos-universal.dmg) | 858 KB |
+| Universal (Apple Silicon + Intel) · .zip archive | [`idler-macos-universal.zip`](https://github.com/stoatworks-labs/idler/releases/latest/download/idler-macos-universal.zip) | 526 KB |
 
 </details>
 
@@ -70,7 +70,7 @@ repo (`tools/video.cues`), not filmed off a screen.*
 
 All builds, checksums and release notes: [github.com/stoatworks-labs/idler/releases](https://github.com/stoatworks-labs/idler/releases).
 
-The Windows builds are unsigned, so SmartScreen warns once.
+macOS builds are signed and notarised and open normally. The Windows builds are unsigned, so SmartScreen warns once.
 
 <!-- downloads:end -->
 
