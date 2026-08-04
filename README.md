@@ -7,9 +7,9 @@
 > saver draws at five different times including zero, that no control is dead,
 > and — for the two savers that grow — that a frame reached by replaying the
 > clock is **byte-identical** to the same frame rendered cold (see
-> [Status](#status)). It has **never been loaded into Resolume** — only
-> compiled, rendered and measured offline. Check it in your own rig before
-> trusting it in a show.
+> [Status](#status)). Both plugins have been loaded into Resolume and run by the
+> author; what has *not* been checked there is listed under
+> [Status](#status). Check it in your own rig before trusting it in a show.
 
 The Windows 95/98 screensaver suite, rebuilt as a generator for Resolume
 Arena/Avenue.
@@ -103,11 +103,14 @@ Verified offline by `tools/verify.sh`, which runs:
   clock up to it are byte-identical, for all eleven
 - **sweep** — 64 control/context pairs, none dead
 
+Both plugins have been **loaded into Resolume and run**, and all eleven savers
+render there.
+
 What that does **not** cover, and you should assume is untested:
 
-- **It has never run inside Resolume or Resolve.** The bundles load in a
-  headless harness; how the parameter groups land in the inspector, and whether
-  Bar sync locks against a real transport, are unchecked.
+- **Bar sync has not been checked against a real transport**, and how the
+  parameter groups land in the inspector has not been reviewed.
+- **It has never been used on a live show.**
 - **Windows is built but never run.**
 - There is no OpenFX build yet, so no Resolve/Nuke/Natron.
 

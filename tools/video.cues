@@ -1,0 +1,211 @@
+# The project video, as a cue sheet.
+#
+# Every frame is the real plugin rendering through the real FFGL sequence -- this
+# is the generator being *operated*, not a mock-up. Render with:
+#
+#   ./build/idtest --sequence /tmp/id-frames --script tools/video.cues \
+#                  --size 1920x1080 --seconds 52 --fps 30 --text "IDLER"
+#
+# Syntax: `T Name=V` sets at a time, `T1..T2 Name=V1..V2` ramps between the two
+# (eased, because a parameter that starts and stops abruptly reads as a cut).
+#
+# Every value here is the 0..1 the host sees, not the physical quantity -- see
+# Controls.h for why there is no other kind. Option parameters are the exception
+# and carry the element index: Saver 0..10, Shading 0 Flat / 1 Lit / 2 Wireframe,
+# Colour Mode 0 Classic / 1 Tint / 2 Spread / 3 Cycle.
+#
+# ---------------------------------------------------------------------------
+# NOTHING HERE SETS `Preset`, AND IT MUST NOT.
+#
+# Cues are applied in file order on EVERY frame, not once when their time comes.
+# A `Preset` cue would therefore re-apply for the whole rest of the piece -- and
+# because editing any preset-covered parameter flips the dropdown back to Custom,
+# a `Preset` cue and a ramp of anything it covers fight each other once per
+# frame: the ramp sets the value and clears the preset, the preset cue sees the
+# change and copies its whole row back over the top. The picture flickers between
+# two sets of parameters at 30Hz and the cue sheet looks correct.
+#
+# So each saver's scene is set out in full below. It is more lines and it is the
+# only version that renders what it says.
+# ---------------------------------------------------------------------------
+#
+# The order of the piece: the flat ones first, in the order they appeared on the
+# machine, then the OpenGL ones -- ending on 3D Pipes and 3D Text, because the
+# pipes are what everybody actually remembers and the text is the one that can
+# carry a sign-off.
+
+# ------------------------------------------------------------ 0s: Mystify
+# The one people picture when you say "screensaver". Opens mid-motion rather
+# than from nothing: Phase is offset so the trails are already there on frame 1.
+0 Saver=0
+0 Density=0.55
+0 Complexity=0.35
+0 Size=0.5
+0 Length=0.45
+0 Line Width=0.25
+0 Variation=0.5
+0 Shading=0
+0 Speed=0.5
+0 Phase=0.12
+0 Seed=0.0
+0 Fog=0.0
+0 Colour Mode=0
+0 Opacity=1.0
+0 Background Opacity=1.0
+
+# The trail lengthens as the shot settles, which is the control worth showing
+# first because it is the one that makes Mystify look like Mystify.
+1.5..5.0 Length=0.45..0.8
+
+# ------------------------------------------------------------ 5s: Beziers
+# Density at 0.3 is a single curve, and a single Bezier through five bouncing
+# points spends a lot of its life nearly straight -- the first cut caught it flat
+# and the beat was an empty frame with a line in it. Two curves and a long trail.
+5 Saver=1
+5 Density=0.55
+5 Complexity=0.45
+5 Length=0.85
+5 Line Width=0.28
+5 Phase=0.05
+
+# ------------------------------------------------------------ 9s: Curves and Colors
+9 Saver=2
+9 Density=0.25
+9 Complexity=0.45
+9 Size=0.6
+9 Length=0.7
+9 Line Width=0.2
+9 Hue Cycle=0.55
+# The ratio drifting off a whole number is what makes the figure precess rather
+# than close and repeat. Shown by moving it.
+9.5..13.0 Complexity=0.45..0.62
+
+# ------------------------------------------------------------ 13s: Flying Windows
+13 Saver=3
+13 Density=0.45
+13 Complexity=0.5
+13 Size=0.5
+13 Variation=0.4
+13 Line Width=0.3
+13 Field of View=0.45
+13 Hue Cycle=0.5
+
+# ------------------------------------------------------------ 17s: Flying Through Space
+# Opens as it shipped -- white dots, no streaks -- then the streak comes up,
+# which is the thing the original could not do.
+17 Saver=4
+17 Density=0.55
+17 Size=0.35
+17 Length=0.02
+17 Complexity=0.5
+17 Variation=0.5
+17 Colour Mode=0
+19.0..22.0 Length=0.02..0.75
+19.0..22.0 Density=0.55..0.85
+19.0..22.0 Speed=0.5..0.68
+
+# ------------------------------------------------------------ 22s: Scrolling Marquee
+# Density is copies IN FLIGHT, and at 2 the repeats overlap: the first cut read
+# "RIDLERIDLE" across the frame, which is the saver working exactly as specified
+# and completely illegible. One copy for the video.
+22 Saver=5
+22 Speed=0.5
+22 Density=0.0
+22 Size=0.5
+22 Length=0.35
+22 Line Width=0.45
+22 Variation=0.0
+22 Complexity=0.5
+22 Colour Mode=0
+22 Phase=0.0
+
+# ------------------------------------------------------------ 26s: 3D Maze
+# The first of the OpenGL ones. Lit, fogged, and walking.
+26 Saver=6
+26 Density=0.4
+26 Complexity=0.4
+26 Size=0.5
+26 Variation=0.5
+26 Shading=1
+26 Field of View=0.4
+26 Camera Tilt=0.5
+26 Fog=0.55
+26 Colour Mode=0
+26 Speed=0.5
+
+# ------------------------------------------------------------ 31s: 3D Pipes
+# The headliner, and the longest beat. Starts nearly empty and fills, which is
+# the whole behaviour -- so Phase is pulled back to zero here and then run
+# forward, rather than dropping in on a finished network.
+31 Saver=7
+31 Density=0.62
+31 Complexity=0.45
+31 Size=0.5
+31 Length=0.6
+31 Variation=0.5
+31 Shading=1
+31 Field of View=0.4
+# Camera Distance 0.5 put the box a long way off and the pipes read as a scribble
+# in the middle of a black frame. 0.22 fills it.
+31 Camera Distance=0.22
+31 Fog=0.3
+31 Colour Mode=0
+31 Phase=0.03
+31 Speed=0.5
+# Phase is the scrub: the network grows to wherever the slider is put, because
+# the state at any time is a replay from the seed. This is the plugin's one real
+# argument, so it gets the longest beat in the piece.
+31.5..38.5 Phase=0.03..0.34
+
+# ------------------------------------------------------------ 39s: 3D Flying Objects
+39 Saver=8
+39 Density=0.5
+39 Complexity=0.5
+39 Size=0.5
+39 Length=0.5
+39 Variation=0.6
+39 Shading=1
+39 Fog=0.2
+39 Camera Distance=0.5
+39 Phase=0.05
+
+# ------------------------------------------------------------ 43s: 3D FlowerBox
+# Ends on wireframe, which is the shading mode this one rewards most and a look
+# nothing in 1998 could do.
+43 Saver=9
+43 Density=0.5
+43 Complexity=0.55
+43 Size=0.55
+43 Length=0.5
+43 Line Width=0.3
+43 Shading=1
+43 Fog=0.0
+43 Camera Distance=0.4
+43 Colour Mode=0
+45.5 Shading=2
+45.5 Line Width=0.4
+
+# ------------------------------------------------------------ 47s: 3D Text
+# The sign-off. Tinted rather than Classic, because the last shot should show the
+# suite under one colour scheme -- which is the thing that makes any of it usable
+# behind a band.
+47 Saver=10
+47 Density=0.25
+47 Complexity=0.35
+47 Size=0.55
+47 Length=0.4
+47 Line Width=0.42
+47 Shading=1
+47 Fog=0.0
+47 Camera Distance=0.45
+47 Camera Tilt=0.52
+# 3D Text rotates a full turn, as it did -- so for a lot of its cycle the
+# lettering is seen from BEHIND and reads mirrored. That is correct behaviour and
+# a poor last shot: the first cut signed off on "R3LDI". Phase is chosen so the
+# turn passes through front-on at about 50s and the piece ends facing the camera.
+47 Phase=0.145
+47 Colour Mode=1
+47 Colour=0.55
+47 Colour_Green=0.8
+47 Colour_Blue=1.0
+47 Speed=0.42

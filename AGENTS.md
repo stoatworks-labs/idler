@@ -175,9 +175,16 @@ passed every assertion above.** Regenerate it after any change to a saver, and
 look at it.
 
 **Host verification is Allan's, not an agent's.** Driving the Resolume GUI from
-a session is unreliable. **Nothing in this repo has been loaded into Resolume**
-— the two things most worth checking there are how the parameter groups land in
-the inspector and whether Bar sync locks against a real transport.
+a session is unreliable, so nothing here should attempt it.
+
+**Both plugins have been loaded into Resolume and run, and all eleven savers
+render there** (Allan, 2026-08-04, ahead of v0.1.0). That is the first time a
+plugin in this fleet reached a real host before its release rather than after.
+
+Still unchecked in the host, and worth saying so rather than letting the
+distinction rot: whether **Bar sync** locks against a real transport, and how
+the **parameter groups** land in the inspector. Neither is provable offline —
+the harness supplies its own clock and has no inspector.
 
 ---
 
