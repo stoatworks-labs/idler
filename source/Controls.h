@@ -289,6 +289,14 @@ float HueSpreadFromParam( float value );
 /// Hue rotation in turns per second. -0.5..0.5, exactly 0 at the centre.
 float HueCycleFromParam( float value );
 
+/// Every host parameter, mapped into a Settings.
+///
+/// The FFGL plugin and the OpenFX one both call this with their own 0..1 array,
+/// so the curves, ranges and the background premultiply have exactly one home.
+/// `time` is saver time with speed, sync and phase already folded in.
+Settings SettingsFromParams( const float* params, int width, int height, float time,
+                             const char* text, float audioLevel );
+
 /// Read an option parameter.
 ///
 /// Option parameters do NOT hold 0..1 -- they hold the element value the

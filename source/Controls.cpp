@@ -187,6 +187,63 @@ float HueCycleFromParam( float value )
 	return centred * std::fabs( centred ) * 0.5f;
 }
 
+//---------------------------------------------------------------------------
+// Parameters to settings -- the one home.
+//
+// Two builds read this: the FFGL plugin, and the OpenFX one, which fills the
+// same 0..1 array from its own parameters and calls straight through. That is
+// deliberate. The mapping is where a preset actually means something -- a curve
+// on Speed, a range on Field of View, the premultiply on the background -- and
+// a second copy of it is how the same preset comes to look different in Resolve
+// than it does in Resolume.
+//---------------------------------------------------------------------------
+Settings SettingsFromParams( const float* params, int width, int height, float time,
+                             const char* text, float audioLevel )
+{
+	Settings s;
+
+	s.saver = static_cast< SaverKind >( Option( params[ PT_SAVER ], static_cast< int >( SaverKind::Count ) ) );
+
+	s.density    = Clamp01( params[ PT_DENSITY ] );
+	s.complexity = Clamp01( params[ PT_COMPLEXITY ] );
+	s.size       = Clamp01( params[ PT_SIZE ] );
+	s.length     = Clamp01( params[ PT_LENGTH ] );
+	s.lineWidth  = Clamp01( params[ PT_LINE_WIDTH ] );
+	s.variation  = Clamp01( params[ PT_VARIATION ] );
+	s.shading    = static_cast< Shading >( Option( params[ PT_SHADING ], static_cast< int >( Shading::Count ) ) );
+
+	s.time = time;
+	s.seed = SeedFromParam( params[ PT_SEED ] );
+
+	s.fov         = FovFromParam( params[ PT_FOV ] );
+	s.camDistance = Clamp01( params[ PT_CAM_DISTANCE ] );
+	s.camTilt     = CamTiltFromParam( params[ PT_CAM_TILT ] );
+	s.fog         = Clamp01( params[ PT_FOG ] );
+
+	s.colourMode = static_cast< ColourMode >( Option( params[ PT_COLOUR_MODE ], static_cast< int >( ColourMode::Count ) ) );
+	s.tint       = { Clamp01( params[ PT_COLOUR_R ] ), Clamp01( params[ PT_COLOUR_G ] ), Clamp01( params[ PT_COLOUR_B ] ) };
+	s.hueSpread  = HueSpreadFromParam( params[ PT_HUE_SPREAD ] );
+	s.hueCycle   = HueCycleFromParam( params[ PT_HUE_CYCLE ] );
+	s.opacity    = Clamp01( params[ PT_OPACITY ] );
+
+	const float backAlpha = Clamp01( params[ PT_BACK_OPACITY ] );
+	// Premultiplied, because that is what the target is cleared to and what the
+	// scene shader writes.
+	s.background = { Clamp01( params[ PT_BACK_R ] ) * backAlpha,
+	                 Clamp01( params[ PT_BACK_G ] ) * backAlpha,
+	                 Clamp01( params[ PT_BACK_B ] ) * backAlpha,
+	                 backAlpha };
+
+	s.aspect = ( height > 0 ) ? static_cast< float >( width ) / static_cast< float >( height ) : 1.0f;
+	s.text   = text;
+
+	s.audioLevel = audioLevel;
+	s.audioSize  = Clamp01( params[ PT_AUDIO_SIZE ] );
+	s.audioSpeed = Clamp01( params[ PT_AUDIO_SPEED ] );
+
+	return s;
+}
+
 int Option( float value, int count )
 {
 	const int index = static_cast< int >( value + 0.5f );

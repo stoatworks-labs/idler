@@ -124,6 +124,14 @@ cmake --install build        # into ~/Documents/Resolume Arena/Extra Effects
 macOS builds universal (arm64 + x86_64) by default. Windows needs vcpkg for
 GLEW; the manifest is in `vcpkg.json`.
 
+This also builds **`Idler.ofx.bundle`** — the same eleven savers as OpenFX
+plugins for DaVinci Resolve, Nuke and Natron, a generator and a matching filter
+in one bundle. Copy it into `/Library/OFX/Plugins`. An OFX host hands a plugin a
+buffer rather than a GL context, so that build rasterises in software; the savers
+themselves are the same code, and `idtest --raster` checks the two renderers
+against each other. Sync there offers Free and Manual only, because OFX carries
+no tempo — Phase is the thing to keyframe.
+
 ## Status
 
 Verified offline by `tools/verify.sh`, which runs:
@@ -148,7 +156,9 @@ What that does **not** cover, and you should assume is untested:
   parameter groups land in the inspector has not been reviewed.
 - **It has never been used on a live show.**
 - **Windows is built but never run.**
-- There is no OpenFX build yet, so no Resolve/Nuke/Natron.
+- **The OpenFX build has never run in Resolve, Nuke or Natron.** It loads and
+  renders under `ofxprobe`, a test host, and its software rasteriser is checked
+  against the GL one on all eleven savers — but no real OFX host has seen it.
 
 ## Not affiliated with Microsoft
 

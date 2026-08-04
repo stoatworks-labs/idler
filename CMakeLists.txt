@@ -69,6 +69,29 @@ add_subdirectory(external/ffgl EXCLUDE_FROM_ALL)
 # its own MODULE target below. Putting either in the shared library would
 # register both plugins into both bundles.
 # ---------------------------------------------------------------------------
+# The savers themselves. Each is a table row in Savers.cpp plus one file.
+#
+# Declared once because BOTH builds compile them -- the FFGL plugin and the
+# OpenFX one. A duplicated list would let a twelfth saver be added to one and
+# not the other, which builds and links perfectly on the side it was added to.
+set(IDLER_SAVER_SOURCES
+    source/savers/Mystify.cpp
+    source/savers/Beziers.cpp
+    source/savers/Curves.cpp
+    source/savers/FlyingWindows.cpp
+    source/savers/Starfield.cpp
+    source/savers/Marquee.cpp
+    source/savers/Maze.cpp
+    source/savers/Pipes.cpp
+    source/savers/FlyingObjects.cpp
+    source/savers/FlowerBox.cpp
+    source/savers/Text3D.cpp
+    source/savers/Font.h
+    source/savers/Font.cpp
+    source/savers/Teapot.h
+    source/savers/Teapot.cpp
+)
+
 add_library(idler_core OBJECT
     source/Diag.h
     source/Diag.cpp
@@ -88,22 +111,7 @@ add_library(idler_core OBJECT
     source/Idler.h
     source/Idler.cpp
 
-    # The savers themselves. Each is a table row in Savers.cpp plus one file.
-    source/savers/Mystify.cpp
-    source/savers/Beziers.cpp
-    source/savers/Curves.cpp
-    source/savers/FlyingWindows.cpp
-    source/savers/Starfield.cpp
-    source/savers/Marquee.cpp
-    source/savers/Maze.cpp
-    source/savers/Pipes.cpp
-    source/savers/FlyingObjects.cpp
-    source/savers/FlowerBox.cpp
-    source/savers/Text3D.cpp
-    source/savers/Font.h
-    source/savers/Font.cpp
-    source/savers/Teapot.h
-    source/savers/Teapot.cpp
+    ${IDLER_SAVER_SOURCES}
 )
 
 target_include_directories(idler_core PUBLIC source)
@@ -191,3 +199,75 @@ install(TARGETS IdlerSource IdlerEffect
     LIBRARY DESTINATION "."
     BUNDLE  DESTINATION "."
 )
+#---------------------------------------------------------------------------
+# OpenFX: the same eleven savers, rasterised in software.
+#
+# An OFX host hands over a buffer and most never offer a GL context, so this
+# build swaps the renderer and reuses everything else -- Savers.cpp, Controls.cpp
+# and Presets.h are shared source, not copies. `idtest --raster` is what keeps
+# the two renderers agreeing.
+#
+# Both plugins live in ONE bundle: unlike FFGL, OFX resolves several plugins per
+# binary, so the generator and the mask filter are two factories in one .ofx.
+#---------------------------------------------------------------------------
+option(BUILD_OFX "Build the OpenFX plugin" ON)
+
+if(BUILD_OFX)
+    set(OFX_SDK "${CMAKE_CURRENT_SOURCE_DIR}/external/openfx")
+
+    add_library(IdlerOFX MODULE
+        source/ofx/IdlerOFX.cpp
+        source/ofx/Raster.cpp
+        source/Controls.cpp
+        source/Mesh.cpp
+        source/Savers.cpp
+        # The savers warn through Diag when a replay runs away, and that is
+        # worth having in Resolve too: it is the one failure whose only other
+        # symptom is the plugin taking a very long time over one frame.
+        source/Diag.cpp
+        ${IDLER_SAVER_SOURCES}
+        ${OFX_SDK}/Support/Library/ofxsCore.cpp
+        ${OFX_SDK}/Support/Library/ofxsImageEffect.cpp
+        ${OFX_SDK}/Support/Library/ofxsInteract.cpp
+        ${OFX_SDK}/Support/Library/ofxsLog.cpp
+        ${OFX_SDK}/Support/Library/ofxsMultiThread.cpp
+        ${OFX_SDK}/Support/Library/ofxsParams.cpp
+        ${OFX_SDK}/Support/Library/ofxsProperty.cpp
+        ${OFX_SDK}/Support/Library/ofxsPropertyValidation.cpp
+    )
+    target_include_directories(IdlerOFX PRIVATE
+        source
+        "${OFX_SDK}/include"
+        "${OFX_SDK}/Support/include"
+    )
+    target_compile_definitions(IdlerOFX PRIVATE
+        IDLER_VERSION="${PROJECT_VERSION}"
+        PLUGIN_VERSION_MAJOR=${PROJECT_VERSION_MAJOR}
+        PLUGIN_VERSION_MINOR=${PROJECT_VERSION_MINOR}
+    )
+
+    # @PROJECT_NAME@ and @OFX_BUNDLE_IDENTIFIER@ are what cmake/InfoOFX.plist.in
+    # expects. Hardcoding a name there builds, loads and renders perfectly and
+    # then fails codesign at release time -- see the comment in that file.
+    set(OFX_BUNDLE_IDENTIFIER "com.stoatworks.idler")
+    set(OFX_BUNDLE_DIR "${CMAKE_BINARY_DIR}/Idler.ofx.bundle")
+    set_target_properties(IdlerOFX PROPERTIES
+        PREFIX ""
+        SUFFIX ".ofx"
+        OUTPUT_NAME "${PROJECT_NAME}"
+        LIBRARY_OUTPUT_DIRECTORY "${OFX_BUNDLE_DIR}/Contents/MacOS"
+    )
+    if(APPLE)
+        configure_file(cmake/InfoOFX.plist.in
+            "${OFX_BUNDLE_DIR}/Contents/Info.plist" @ONLY)
+    elseif(WIN32)
+        set_target_properties(IdlerOFX PROPERTIES
+            LIBRARY_OUTPUT_DIRECTORY "${OFX_BUNDLE_DIR}/Contents/Win64"
+            RUNTIME_OUTPUT_DIRECTORY "${OFX_BUNDLE_DIR}/Contents/Win64"
+            LIBRARY_OUTPUT_DIRECTORY_RELEASE "${OFX_BUNDLE_DIR}/Contents/Win64"
+            RUNTIME_OUTPUT_DIRECTORY_RELEASE "${OFX_BUNDLE_DIR}/Contents/Win64"
+            ARCHIVE_OUTPUT_DIRECTORY "${OFX_BUNDLE_DIR}/importlib"
+        )
+    endif()
+endif()
+

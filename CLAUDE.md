@@ -32,6 +32,22 @@ Preset `N+1` is saver `N` set up the way it actually ran. The Saver dropdown
 alone gives you that saver driven by whatever the sliders happen to say — see
 `Presets.h` for why that distinction matters here more than elsewhere.
 
+## OpenFX build
+- `source/ofx/IdlerOFX.cpp` → `build/Idler.ofx.bundle` (target `IdlerOFX`,
+  `-DBUILD_OFX=OFF` to skip): **both** plugins in one bundle —
+  `com.stoatworks.idler` (generator) and `com.stoatworks.idlermask` (filter).
+- The savers, Controls, Presets and Mesh are linked straight from source. Only
+  the renderer differs: `source/ofx/Raster.cpp` rasterises `Scene` in software,
+  because an OFX host hands over a buffer and most never offer a GL context.
+- **`idtest --raster` is what keeps the two renderers honest.** Add a shading
+  rule to the fragment shader and it goes here too.
+- Sync offers Free and Manual only — OFX carries no tempo. There is no audio.
+- Smoke test (ofxprobe drives the Filter context; the generator's render runs
+  only in a real host):
+  `../resolume-ofx-bridge/build/ofxprobe --dir build --render com.stoatworks.idlermask --size 640x360 --out /tmp/i.bmp`
+- OFX SDK subset (BSD-3) vendored under `external/openfx`.
+- Install for Resolve: copy the bundle into `/Library/OFX/Plugins`.
+
 ## Verify
 - Everything, including the release-time bundle checks: `tools/verify.sh`
 - While working: `tools/verify.sh --fast`
@@ -39,6 +55,8 @@ alone gives you that saver driven by whatever the sliders happen to say — see
 - The mesh each saver builds: `./build/idtest --geometry`
 - Every saver draws something: `./build/idtest --coverage`
 - No dead controls: `python3 tools/sweep.py`
+- The software rasteriser agrees with GL: `./build/idtest --raster`
+- ...and look at the difference: `--raster-sheet /tmp/raster.png`
 
 ## Notes
 - **Every saver is a pure function of (time, seed).** The two that grow —
@@ -46,7 +64,12 @@ alone gives you that saver driven by whatever the sliders happen to say — see
   cache that must never change the answer. `--replay` demands byte-identical
   frames.
 - **A saver never touches OpenGL.** It fills a `Scene`: a camera, a shading
-  mode, and one triangle mesh. Eleven savers, one draw call.
+  mode, and one triangle mesh. Eleven savers, one draw call — and the OFX build
+  rasterises the same `Scene` in software rather than reimplementing anything.
+- **The effect variant defaults Background Opacity to 0, the source to 1.** An
+  opaque background covers the clip the effect exists to draw over, and makes
+  every mask mode a no-op. Presets skip the background on the effect for the
+  same reason they skip Mask Mode.
 - **Eleven savers share seven generic scene controls**, so most controls are
   dead in most savers by design. `tools/sweep.py` carries the table of which
   saver each is live in; adding a saver means revisiting it.

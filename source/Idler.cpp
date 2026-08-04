@@ -81,7 +81,13 @@ IdlerPlugin::IdlerPlugin( bool overInput ) :
 	params[ PT_BACK_R ]       = 0.0f;
 	params[ PT_BACK_G ]       = 0.0f;
 	params[ PT_BACK_B ]       = 0.0f;
-	params[ PT_BACK_OPACITY ] = 1.0f;// opaque black: what a mask wants
+	// The SOURCE wants opaque black -- that is what makes it usable as a luma
+	// mask on a layer above. The EFFECT wants the opposite: it exists to draw
+	// the saver over the clip, and an opaque background covers the clip
+	// completely, which makes Over look like the effect replaced the clip and
+	// makes Reveal, Hide and Colourise no-ops (scene alpha is 1 everywhere, so
+	// there is nothing for them to cut against). Found porting to OFX.
+	params[ PT_BACK_OPACITY ] = overInput ? 0.0f : 1.0f;
 
 	params[ PT_MASK_MODE ] = static_cast< float >( MaskMode::Over );
 	params[ PT_MIX ]       = 1.0f;
@@ -353,6 +359,15 @@ void IdlerPlugin::applyPreset( int presetIndex )
 	for( int j = 0; j < presets::kParamCount; ++j )
 	{
 		const unsigned int id = kPresetParamIDs[ j ];
+
+		// On the effect, the background is the operator's compositing decision
+		// and not the preset's -- exactly like Mask Mode and Mix, which presets
+		// already leave alone for the same reason. Without this, picking any
+		// preset re-covers the clip with opaque black.
+		if( overInput
+		    && ( id == PT_BACK_R || id == PT_BACK_G || id == PT_BACK_B || id == PT_BACK_OPACITY ) )
+			continue;
+
 		if( std::fabs( params[ id ] - preset.v[ j ] ) <= 1e-6f )
 			continue;
 
@@ -549,48 +564,7 @@ float IdlerPlugin::CurrentTime() const
 //---------------------------------------------------------------------------
 Settings IdlerPlugin::CurrentSettings( int width, int height ) const
 {
-	Settings s;
-
-	s.saver = static_cast< SaverKind >( Option( params[ PT_SAVER ], static_cast< int >( SaverKind::Count ) ) );
-
-	s.density    = Clamp01( params[ PT_DENSITY ] );
-	s.complexity = Clamp01( params[ PT_COMPLEXITY ] );
-	s.size       = Clamp01( params[ PT_SIZE ] );
-	s.length     = Clamp01( params[ PT_LENGTH ] );
-	s.lineWidth  = Clamp01( params[ PT_LINE_WIDTH ] );
-	s.variation  = Clamp01( params[ PT_VARIATION ] );
-	s.shading    = static_cast< Shading >( Option( params[ PT_SHADING ], static_cast< int >( Shading::Count ) ) );
-
-	s.time = CurrentTime();
-	s.seed = SeedFromParam( params[ PT_SEED ] );
-
-	s.fov         = FovFromParam( params[ PT_FOV ] );
-	s.camDistance = Clamp01( params[ PT_CAM_DISTANCE ] );
-	s.camTilt     = CamTiltFromParam( params[ PT_CAM_TILT ] );
-	s.fog         = Clamp01( params[ PT_FOG ] );
-
-	s.colourMode = static_cast< ColourMode >( Option( params[ PT_COLOUR_MODE ], static_cast< int >( ColourMode::Count ) ) );
-	s.tint       = { Clamp01( params[ PT_COLOUR_R ] ), Clamp01( params[ PT_COLOUR_G ] ), Clamp01( params[ PT_COLOUR_B ] ) };
-	s.hueSpread  = HueSpreadFromParam( params[ PT_HUE_SPREAD ] );
-	s.hueCycle   = HueCycleFromParam( params[ PT_HUE_CYCLE ] );
-	s.opacity    = Clamp01( params[ PT_OPACITY ] );
-
-	const float backAlpha = Clamp01( params[ PT_BACK_OPACITY ] );
-	// Premultiplied, because that is what the target is cleared to and what the
-	// scene shader writes.
-	s.background = { Clamp01( params[ PT_BACK_R ] ) * backAlpha,
-	                 Clamp01( params[ PT_BACK_G ] ) * backAlpha,
-	                 Clamp01( params[ PT_BACK_B ] ) * backAlpha,
-	                 backAlpha };
-
-	s.aspect = ( height > 0 ) ? static_cast< float >( width ) / static_cast< float >( height ) : 1.0f;
-	s.text   = text.c_str();
-
-	s.audioLevel = audioLevel;
-	s.audioSize  = Clamp01( params[ PT_AUDIO_SIZE ] );
-	s.audioSpeed = Clamp01( params[ PT_AUDIO_SPEED ] );
-
-	return s;
+	return SettingsFromParams( params, width, height, CurrentTime(), text.c_str(), audioLevel );
 }
 
 void IdlerPlugin::EnsureSaver()

@@ -136,11 +136,69 @@ audio-driven clock cannot be scrubbed and cannot be a pure function of time. It
 is separate from Speed, and it defaults to zero, so nothing else loses the
 property by accident.
 
+**The effect variant must default Background Opacity to 0, and the source to 1.**
+They are the same class with one flag, so it is natural to give them the same
+defaults, and v0.1.0 shipped doing exactly that. An opaque black background
+covers the clip the effect exists to draw over: Over looks like the effect
+replaced the clip, and Reveal, Hide and Colourise become no-ops, because the
+scene's alpha is 1 everywhere and there is nothing for them to cut against. The
+source wants the opposite — opaque black is what makes its output usable as a
+luma mask on the layer above. **Presets skip the background on the effect** for
+the same reason they already skip Mask Mode and Mix: on an effect the background
+is a compositing decision about somebody else's clip, not a property of how the
+saver looked. Found by porting to OFX, where the mask plugin rendered the saver
+over a test clip that had vanished.
+
+**`set -o pipefail` plus `grep -q` is a trap, and `tools/verify.sh` had it.**
+A `grep -q` that finds its match exits immediately; the writer upstream takes
+SIGPIPE; under pipefail the whole pipeline reports failure even though the match
+succeeded. So `nm -gU "$binary" | grep -q plugMain` reports a correctly-exported
+symbol as missing. It is **output-size dependent**, so it fails intermittently
+and on the larger binary first — here it gave a false FAIL on the OFX bundle
+while the identical FFGL line got away with it. Capture into a variable and match
+with `case`, which has no pipeline at all. The direction matters: written as
+`if ! ... | grep -q FORBIDDEN`, the same bug is a false **PASS**.
+
 **`flat`, `active`, `filter`, `input`, `output`, `sample` and `common` are GLSL
 reserved words**, and a shader that will not compile surfaces only at runtime,
 as "the plugin does nothing". That is what `Diag` is for.
 
 ---
+
+## The OpenFX build
+
+`source/ofx/` is a second **renderer**, not a second plugin. `Savers.cpp`,
+`Controls.cpp`, `Mesh.cpp` and `Presets.h` are linked straight into the OFX
+target from the same files the FFGL bundles use — the CMake list of savers is
+declared once and shared, because a twelfth saver added to a duplicated list
+links fine on the side it was added to.
+
+An OFX host hands over a buffer and expects pixels; Resolve will call the CPU
+path whenever it likes and Natron has no GL path at all. So `Raster.cpp`
+rasterises `Scene` in software, mirroring `Shaders.cpp` and the GL state
+`Idler.cpp` sets. Two renderers for one plugin is a divergence waiting to
+happen, and the divergence anyone would actually hit is a preset that looks
+right in Resolume and wrong in Resolve — which is what `idtest --raster` exists
+to catch. It compares the picture rather than the pixels, because a GPU's fill
+rule, interpolation precision and `fwidth` are its own.
+
+Two things the software path cannot cut a corner on:
+
+- **Near-plane clipping.** A vertex at or behind the eye has w <= 0 and the
+  divide puts it somewhere meaningless rather than merely wrong. 3D Maze walks
+  the camera down a corridor with walls passing either side, so it fires on most
+  of that saver's frames.
+- **Draw order.** With blending and the depth test both on, the picture depends
+  on the order the mesh was built in, so triangles are never sorted.
+
+What differs from FFGL, deliberately: Sync offers Free and Manual only (OFX
+carries no tempo, and deriving one from the frame number would be a different
+feature wearing the same name), and there is no audio. The render is
+`eRenderInstanceSafe` because the growing savers keep a replay cache, and two
+concurrent renders of one instance sharing it would flicker between two network
+lengths; the compositing pass is still threaded.
+
+**It has never run in a real OFX host** — only under `ofxprobe`.
 
 ## Checking your work
 

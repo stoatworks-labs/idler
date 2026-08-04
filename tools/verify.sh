@@ -75,7 +75,18 @@ for NAME in "Idler" "Idler Mask"; do
 	# plugins -- that is what happens if the registration's translation unit
 	# gets dropped by the linker. Checking the symbol is necessary, not
 	# sufficient; --coverage below is what proves a plugin is really in there.
-	if nm -gU "$BINARY" | grep -q plugMain; then
+	# Captured, then matched with `case` -- never `nm | grep -q`. This script
+	# runs under `set -o pipefail`, and a `grep -q` that finds its match exits
+	# immediately, so `nm` upstream takes SIGPIPE and the PIPELINE reports
+	# failure even though the symbol is there. It is output-size dependent, so
+	# it fails intermittently and on the bigger binary first: it gave a false
+	# FAIL on the OFX bundle below while this line got away with it.
+	SYMBOLS=$( nm -gU "$BINARY" 2>/dev/null || true )
+	case "$SYMBOLS" in
+		*plugMain*) true ;;
+		*) false ;;
+	esac
+	if [ $? -eq 0 ]; then
 		ok "$NAME: exports plugMain"
 	else
 		bad "$NAME: no plugMain"
@@ -128,6 +139,74 @@ if "$BUILD/idtest" --replay; then ok "replay"; else bad "replay"; fi
 step "sweep -- no dead controls"
 #-----------------------------------------------------------------------------
 if python3 tools/sweep.py --build "$BUILD"; then ok "sweep"; else bad "sweep"; fi
+
+#-----------------------------------------------------------------------------
+step "raster -- the software renderer agrees with the GL one"
+#-----------------------------------------------------------------------------
+# The OFX build cannot use the GL path, so it rasterises Scene in software. Two
+# renderers for one plugin is a divergence waiting to happen, and the one people
+# would hit is a preset that looks right in Resolume and wrong in Resolve.
+if "$BUILD/idtest" --raster; then ok "raster"; else bad "raster"; fi
+
+#-----------------------------------------------------------------------------
+step "OFX bundle"
+#-----------------------------------------------------------------------------
+OFX_BUNDLE="$BUILD/Idler.ofx.bundle"
+OFX_BIN="$OFX_BUNDLE/Contents/MacOS/Idler.ofx"
+
+if [ ! -f "$OFX_BIN" ]; then
+	bad "no OFX binary at $OFX_BIN"
+else
+	# Both entry points, or the host finds a bundle containing nothing.
+	# Captured and matched with `case`, for the pipefail/SIGPIPE reason above.
+	OFX_SYMBOLS=$( nm -gU "$OFX_BIN" 2>/dev/null || true )
+	OFX_HAS_BOTH=0
+	case "$OFX_SYMBOLS" in
+		*_OfxGetPlugin*)
+			case "$OFX_SYMBOLS" in
+				*_OfxGetNumberOfPlugins*) OFX_HAS_BOTH=1 ;;
+			esac ;;
+	esac
+	if [ "$OFX_HAS_BOTH" = 1 ]; then
+		ok "OFX entry points exported"
+	else
+		bad "OFX entry points missing"
+	fi
+
+	# The trap that cost the fleet a tag, and the reason InfoOFX.plist.in is
+	# parameterised: a hardcoded name here builds, loads and RENDERS correctly,
+	# then fails codesign with a message that never mentions the plist.
+	OFX_PLIST="$OFX_BUNDLE/Contents/Info.plist"
+	OFX_EXE=$( /usr/libexec/PlistBuddy -c "Print :CFBundleExecutable" "$OFX_PLIST" 2>/dev/null || echo "" )
+	if [ "$OFX_EXE" = "Idler.ofx" ]; then
+		ok "OFX CFBundleExecutable matches the binary"
+	else
+		bad "OFX CFBundleExecutable is '$OFX_EXE', binary is 'Idler.ofx'"
+	fi
+
+	TEMP=$( mktemp -d )
+	cp -R "$OFX_BUNDLE" "$TEMP/Idler.ofx.bundle"
+	if codesign --force --deep --sign - "$TEMP/Idler.ofx.bundle" 2> "$TEMP/err.txt"; then
+		ok "OFX bundle ad-hoc signs"
+	else
+		bad "OFX codesign: $( head -2 "$TEMP/err.txt" | tr '\n' ' ' )"
+	fi
+	rm -rf "$TEMP"
+
+	# A real OFX host loading it, if the bridge's probe is built. Not fatal when
+	# it is absent -- it lives in a sibling repo.
+	PROBE="$HOME/Projects/resolume-ofx-bridge/build/ofxprobe"
+	if [ -x "$PROBE" ]; then
+		if "$PROBE" --dir "$BUILD" --render com.stoatworks.idlermask \
+		            --size 320x180 --out /tmp/idler-ofx.bmp > /dev/null 2>&1; then
+			ok "ofxprobe rendered the mask variant"
+		else
+			bad "ofxprobe could not render"
+		fi
+	else
+		printf '   --    ofxprobe not built, skipping the host load\n'
+	fi
+fi
 
 #-----------------------------------------------------------------------------
 step "contact sheet"

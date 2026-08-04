@@ -35,6 +35,12 @@
     operator's driver, often keyed), Seed (which variation, not what kind), the
     text, Mask Mode (what the effect does to the clip is the operator's call),
     Mix, and the audio controls.
+
+    **On the effect variant the background entries are skipped too**, for the
+    same reason Mask Mode is: an effect's background is a compositing decision
+    about somebody else's clip, not a property of how the saver looked. A
+    preset's opaque black is right for the source, where it is what makes the
+    output usable as a luma mask, and covers the clip completely on the effect.
 */
 
 namespace idler
