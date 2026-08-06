@@ -43,17 +43,30 @@ endif()
 
 option(IDLER_BUILD_TOOLS "Build the offline render and measurement harness" ON)
 
+# The FFGL plugins, the FFGL SDK submodule and GLEW are all one dependency
+# group, and the OpenFX plugin belongs to none of it -- its bundle links libc++
+# and libSystem and nothing else. Turning this OFF builds the OFX plugin alone,
+# with no GL loader anywhere in the configure.
+#
+# That is not a convenience: on Windows, GLEW arrives through vcpkg, so without
+# it `find_package(GLEW REQUIRED)` fails at CONFIGURE time -- and a machine that
+# only wants the OFX plugin would otherwise have to install a GL loader to build
+# something that does not use one. Default ON, so CI is unchanged.
+option(IDLER_BUILD_FFGL "Build the FFGL plugins (needs the FFGL SDK and, off macOS, GLEW)" ON)
+
 # ---------------------------------------------------------------------------
 # The Resolume FFGL SDK, as a git submodule pinned to b1afaf9 -- the rev the
 # rest of the fleet pins. See AGENTS.md for what is wrong with it.
 # ---------------------------------------------------------------------------
-if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/external/ffgl/CMakeLists.txt")
-    message(FATAL_ERROR
-        "FFGL SDK not found. Run: git submodule update --init --recursive")
-endif()
+if(IDLER_BUILD_FFGL)
+    if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/external/ffgl/CMakeLists.txt")
+        message(FATAL_ERROR
+            "FFGL SDK not found. Run: git submodule update --init --recursive")
+    endif()
 
-set(FFGL_BUILD_EXAMPLE_PLUGINS OFF CACHE BOOL "" FORCE)
-add_subdirectory(external/ffgl EXCLUDE_FROM_ALL)
+    set(FFGL_BUILD_EXAMPLE_PLUGINS OFF CACHE BOOL "" FORCE)
+    add_subdirectory(external/ffgl EXCLUDE_FROM_ALL)
+endif()
 
 # ---------------------------------------------------------------------------
 # Everything both plugins share, as an OBJECT library.
@@ -91,6 +104,8 @@ set(IDLER_SAVER_SOURCES
     source/savers/Teapot.h
     source/savers/Teapot.cpp
 )
+
+if(IDLER_BUILD_FFGL)
 
 add_library(idler_core OBJECT
     source/Diag.h
@@ -199,6 +214,8 @@ install(TARGETS IdlerSource IdlerEffect
     LIBRARY DESTINATION "."
     BUNDLE  DESTINATION "."
 )
+
+endif()  # IDLER_BUILD_FFGL
 #---------------------------------------------------------------------------
 # OpenFX: the same eleven savers, rasterised in software.
 #
