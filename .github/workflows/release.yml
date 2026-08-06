@@ -76,16 +76,53 @@ jobs:
               # export, and check the build really is universal -- CMake latches
               # the architecture list at the first target and silently ignores a
               # late change while still reporting success.
-              lipo -archs "out/$bundle.bundle/Contents/MacOS/$bundle"
-              lipo -archs "out/$bundle.bundle/Contents/MacOS/$bundle" | grep -q arm64
-              lipo -archs "out/$bundle.bundle/Contents/MacOS/$bundle" | grep -q x86_64
-              nm -gU "out/$bundle.bundle/Contents/MacOS/$bundle" | grep -q "_plugMain"
+              #
+              # Captured and matched with `case`, never `... | grep -q`. Actions
+              # runs `shell: bash` as `bash -eo pipefail`, and a `grep -q` that
+              # finds its match exits immediately -- the writer upstream takes
+              # SIGPIPE and the PIPELINE fails, so a correct binary fails the
+              # release. Size-dependent, so it bites the bigger binary first.
+              archs=$( lipo -archs "out/$bundle.bundle/Contents/MacOS/$bundle" )
+              echo "  $bundle: $archs"
+              case "$archs" in *arm64*)  ;; *) echo "no arm64 in $bundle"; exit 1 ;; esac
+              case "$archs" in *x86_64*) ;; *) echo "no x86_64 in $bundle"; exit 1 ;; esac
+              symbols=$( nm -gU "out/$bundle.bundle/Contents/MacOS/$bundle" )
+              case "$symbols" in *_plugMain*) ;; *) echo "$bundle exports no plugMain"; exit 1 ;; esac
             done
           else
             cp "build/Release/Idler.dll" "out/Idler.dll"
             cp "build/Release/Idler Mask.dll" "out/Idler Mask.dll"
           fi
           ls -R out
+
+          # The OpenFX build ships as its own zip rather than being folded into
+          # the FFGL artefact: it installs to /Library/OFX/Plugins, not to
+          # Resolume's Extra Effects, and an operator who wants one rarely wants
+          # the other in the same place.
+          mkdir -p ofxout
+          if [ "${{ runner.os }}" = "macOS" ]; then
+            cp -R "build/Idler.ofx.bundle" "ofxout/Idler.ofx.bundle"
+            ofxbin="ofxout/Idler.ofx.bundle/Contents/MacOS/Idler.ofx"
+            archs=$( lipo -archs "$ofxbin" )
+            echo "  Idler.ofx: $archs"
+            case "$archs" in *arm64*)  ;; *) echo "no arm64 in Idler.ofx"; exit 1 ;; esac
+            case "$archs" in *x86_64*) ;; *) echo "no x86_64 in Idler.ofx"; exit 1 ;; esac
+            symbols=$( nm -gU "$ofxbin" )
+            case "$symbols" in *_OfxGetPlugin*) ;; *) echo "no OfxGetPlugin"; exit 1 ;; esac
+            case "$symbols" in *_OfxGetNumberOfPlugins*) ;; *) echo "no OfxGetNumberOfPlugins"; exit 1 ;; esac
+            # CFBundleExecutable against the binary on disk. A mismatch builds,
+            # loads and renders perfectly and then fails codesign with a message
+            # that never mentions the plist -- it has cost this fleet a tag.
+            exe=$( /usr/libexec/PlistBuddy -c "Print :CFBundleExecutable" \
+                     "ofxout/Idler.ofx.bundle/Contents/Info.plist" )
+            [ "$exe" = "Idler.ofx" ] || { echo "CFBundleExecutable is '$exe'"; exit 1; }
+            codesign --force --deep --sign - --timestamp=none "ofxout/Idler.ofx.bundle"
+          else
+            mkdir -p "ofxout/Idler.ofx.bundle/Contents/Win64"
+            cp "build/Idler.ofx.bundle/Contents/Win64/Idler.ofx" \
+               "ofxout/Idler.ofx.bundle/Contents/Win64/Idler.ofx"
+          fi
+          ls -R ofxout
 
       - name: Archive (zip)
         shell: bash
@@ -95,6 +132,12 @@ jobs:
             7z a "../idler-${{ matrix.name }}.zip" ./*
           else
             zip -r "../idler-${{ matrix.name }}.zip" ./*
+          fi
+          cd ../ofxout
+          if command -v 7z >/dev/null 2>&1; then
+            7z a "../idler-ofx-${{ matrix.name }}.zip" ./*
+          else
+            zip -r "../idler-ofx-${{ matrix.name }}.zip" ./*
           fi
 
       - name: Disk image (macOS)

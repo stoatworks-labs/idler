@@ -124,7 +124,7 @@ cmake --install build        # into ~/Documents/Resolume Arena/Extra Effects
 macOS builds universal (arm64 + x86_64) by default. Windows needs vcpkg for
 GLEW; the manifest is in `vcpkg.json`.
 
-This also builds **`Idler.ofx.bundle`** — the same eleven savers as OpenFX
+From v0.1.1 the release also ships **`Idler.ofx.bundle`** — the same eleven savers as OpenFX
 plugins for DaVinci Resolve, Nuke and Natron, a generator and a matching filter
 in one bundle. Copy it into `/Library/OFX/Plugins`. An OFX host hands a plugin a
 buffer rather than a GL context, so that build rasterises in software; the savers
