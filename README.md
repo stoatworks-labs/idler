@@ -53,9 +53,9 @@ repo (`tools/video.cues`), not filmed off a screen.*
 
 | Build | Download | Size |
 | --- | --- | --- |
-| Universal (Apple Silicon + Intel) · .dmg disk image | [`idler-1.0.0-macos-universal.dmg`](https://github.com/stoatworks-labs/idler/releases/download/v1.0.0/idler-1.0.0-macos-universal.dmg) | 828 KB |
-| Universal (Apple Silicon + Intel) · .zip archive | [`idler-macos-universal.zip`](https://github.com/stoatworks-labs/idler/releases/latest/download/idler-macos-universal.zip) | 487 KB |
-| Universal (Apple Silicon + Intel) · .zip archive (OpenFX — Resolve, Vegas, Nuke) | [`idler-ofx-macos-universal.zip`](https://github.com/stoatworks-labs/idler/releases/latest/download/idler-ofx-macos-universal.zip) | 326 KB |
+| Universal (Apple Silicon + Intel) · .dmg disk image | [`idler-1.0.0-macos-universal.dmg`](https://github.com/stoatworks-labs/idler/releases/download/v1.0.0/idler-1.0.0-macos-universal.dmg) | 860 KB |
+| Universal (Apple Silicon + Intel) · .zip archive | [`idler-macos-universal.zip`](https://github.com/stoatworks-labs/idler/releases/latest/download/idler-macos-universal.zip) | 526 KB |
+| Universal (Apple Silicon + Intel) · .zip archive (OpenFX — Resolve, Vegas, Nuke) | [`idler-ofx-macos-universal.zip`](https://github.com/stoatworks-labs/idler/releases/latest/download/idler-ofx-macos-universal.zip) | 340 KB |
 
 </details>
 
