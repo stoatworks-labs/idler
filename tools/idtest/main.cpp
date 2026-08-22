@@ -803,6 +803,7 @@ int renderSequence( const std::string& directory, const std::string& cuePath, in
 		// real to lock to. The time is NOT pinned: the plugin free-runs off the
 		// host clock exactly as it does in Resolume, which is the only way
 		// footage can honestly show Speed doing anything.
+		plugin.SetClockScaleForTest( 1.0 );//seconds, said out loud rather than inferred
 		plugin.SetTime( now );
 		plugin.SetBeatInfo( 120.0f, static_cast< float >( std::fmod( now / 2.0, 1.0 ) ) );
 
@@ -1175,6 +1176,7 @@ int main( int argc, char** argv )
 			{
 				// Two frames, so UpdateClock has a delta to decide its units
 				// from and UpdateAudio has one to filter over.
+				plugin.SetClockScaleForTest( 1.0 );//seconds, said out loud rather than inferred
 				plugin.SetTime( static_cast< double >( time ) - 1.0 / 30.0 );
 				render( plugin, surface, clip );
 				plugin.SetTime( static_cast< double >( time ) );

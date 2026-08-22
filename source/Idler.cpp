@@ -1,13 +1,23 @@
 #include "Idler.h"
 
+#include <string>
+#include <chrono>
 #include <algorithm>
 #include <cmath>
 
 #include "Diag.h"
 #include "Shaders.h"
+#include "StoatworksAboutParams.h"
 
 namespace idler
 {
+// The buttons are declared one per link, so the count in Controls.h and the
+// count the block actually has must agree. They diverge the day somebody
+// writes a user guide, and this is what says so.
+static_assert( PT_COUNT - PT_ABOUT == stoatworks::about::kParamCount,
+               "Controls.h's About run no longer matches StoatworksAbout.h -- "
+               "add or remove a PT_ABOUT_BUTTON_n to match" );
+
 namespace
 {
 float Clamp01( float v )
@@ -16,10 +26,26 @@ float Clamp01( float v )
 }
 
 /// What the About parameter shows. Display only.
+///
+/// The shared line -- name, version, licence, maker -- plus the one fact that
+/// is Idler's alone and belongs nowhere else. It had been hand-rolled here,
+/// which is how it came to name `stoatworks.com`, a domain that is not ours.
 std::string BuildAboutText()
 {
-	return std::string( "Idler " ) + IDLER_VERSION +
-	       "  |  stoatworks.com  |  The Windows 95/98 screensavers, rebuilt. Not affiliated with Microsoft.";
+	return stoatworks::about::textParam( 0 ) +
+	       "  |  The Windows 95/98 screensavers, rebuilt. Not affiliated with Microsoft.";
+}
+
+/// Frames that must agree before the host's clock unit is settled.
+constexpr int kClockVotes = 4;
+
+/// Wall clock, to calibrate the host's against. Steady rather than system, so
+/// nothing here moves if the machine's clock is corrected.
+double wallSeconds()
+{
+	using namespace std::chrono;
+	static const steady_clock::time_point start = steady_clock::now();
+	return duration_cast< duration< double > >( steady_clock::now() - start ).count();
 }
 } // namespace
 
@@ -179,6 +205,13 @@ IdlerPlugin::IdlerPlugin( bool overInput ) :
 	SetParamInfof( PT_AUDIO_SPEED, "Audio Speed", FF_TYPE_STANDARD );
 
 	SetParamInfo( PT_ABOUT, "About", FF_TYPE_TEXT, aboutText.c_str() );
+	{
+		// Inline rather than through a helper: SetParamInfo is protected on
+		// CFFGLPlugin, so nothing outside the class can call it.
+		FFUInt32 aboutId = PT_ABOUT + 1;
+		for( const auto& b : stoatworks::about::buttons() )
+			SetParamInfo( aboutId++, b.label, FF_TYPE_EVENT, false );
+	}
 
 	//-----------------------------------------------------------------------
 	// Groups. Thirty-odd parameters in one flat list is how somebody else's
@@ -201,7 +234,8 @@ IdlerPlugin::IdlerPlugin( bool overInput ) :
 		SetParamGroup( id, "Output" );
 	for( unsigned int id = PT_AUDIO; id <= PT_AUDIO_SPEED; ++id )
 		SetParamGroup( id, "Audio" );
-	SetParamGroup( PT_ABOUT, "About" );
+	for( unsigned int id = PT_ABOUT; id < PT_COUNT; ++id )
+		SetParamGroup( id, "About" );
 }
 
 //---------------------------------------------------------------------------
@@ -315,6 +349,12 @@ FFResult IdlerPlugin::SetFloatParameter( unsigned int index, float value )
 {
 	if( index >= PT_COUNT )
 		return FF_FAIL;
+
+	// The About buttons open a browser and store nothing, so they are handled
+	// before the params[] write below and before the preset bookkeeping --
+	// pressing one is not the operator taking over from a preset.
+	if( index > PT_ABOUT )
+		return stoatworks::about::handleParam( index - PT_ABOUT, value ) ? FF_SUCCESS : FF_FAIL;
 
 	if( index == PT_PRESET )
 	{
@@ -433,17 +473,93 @@ void IdlerPlugin::InvalidateReplay()
 //---------------------------------------------------------------------------
 void IdlerPlugin::UpdateClock()
 {
-	const double raw = hostTime;
-	if( clockScale == 0.0 && lastRawTime >= 0.0 && raw > lastRawTime )
+	// FFGL never says what unit SetTime arrives in, and hosts disagree:
+	// Resolume sends MILLISECONDS (measured live at 20.0 per frame at its
+	// 50 fps, and the SDK's own Particles sample divides by 1000), while the
+	// offline harness sends seconds. Reading it raw is a thousand times fast
+	// on the one host that matters and exactly right on the one that gets
+	// tested, which is how it stays hidden.
+	//
+	// This used to guess the unit from the magnitude of a single frame delta
+	// and then lock. That had three holes: a delta between 0.5 and 2.0 decided
+	// nothing, a burst of sub-0.5 ms frames at load -- a thumbnail render on a
+	// quick GPU -- locked it to "seconds" for the rest of the session, and
+	// while undecided it assumed seconds, which is precisely the millisecond
+	// host's wrong answer.
+	//
+	// So measure instead of guessing. steady_clock says how much real time
+	// passed, the host says how much host time passed, and the ratio names the
+	// unit outright. Nothing plausible sits between 1 and 1000, so both bands
+	// are wide and a frame fitting neither simply does not vote.
+	const double wallNow = wallSeconds();
+	if( wallStart < 0.0 )
+		wallStart = wallNow;
+
+	// Never read `hostTime` before the host has set it: CFFGLPlugin's
+	// constructor initialises bpm and barPhase and leaves hostTime
+	// uninitialised, so until SetTime lands it is whatever was in that memory.
+	const double raw = hostTimeSeen ? hostTime : -1.0;
+
+	if( clockScale == 0.0 && raw >= 0.0 && lastRawTime >= 0.0 && lastWallTime >= 0.0 )
 	{
-		const double d = raw - lastRawTime;
-		if( d >= 0.001 && d <= 0.5 )
-			clockScale = 1.0;
-		else if( d >= 2.0 && d <= 500.0 )
-			clockScale = 0.001;
+		const double hostDelta = raw - lastRawTime;
+		const double wallDelta = wallNow - lastWallTime;
+
+		// A paused host, a looping clip or a stalled frame tells us nothing.
+		if( hostDelta > 0.0 && wallDelta >= 0.0005 )
+		{
+			const double ratio = hostDelta / wallDelta;
+			if( ratio > 0.1 && ratio < 10.0 )
+				++secondsVotes;
+			else if( ratio > 100.0 && ratio < 10000.0 )
+				++millisVotes;
+
+			// Several frames rather than one, so a single odd frame -- the
+			// first after a seek, say -- cannot decide it on its own.
+			if( secondsVotes >= kClockVotes || millisVotes >= kClockVotes )
+			{
+				clockScale = millisVotes > secondsVotes ? 0.001 : 1.0;
+				diag::info( std::string( "host clock is " )
+				            + ( clockScale == 0.001 ? "milliseconds" : "seconds" )
+				            + ", scale=" + std::to_string( clockScale ) );
+			}
+		}
 	}
-	lastRawTime = raw;
-	hostSeconds = raw * ( clockScale == 0.0 ? 1.0 : clockScale );
+
+	if( raw >= 0.0 )
+		lastRawTime = raw;
+	lastWallTime = wallNow;
+
+	// Until the unit is settled -- and for a host that never calls SetTime at
+	// all -- run on the real clock. Wrong in origin but right in rate, where
+	// assuming seconds would be a thousand times fast on Resolume.
+	hostSeconds = ( raw >= 0.0 && clockScale != 0.0 ) ? raw * clockScale : wallNow - wallStart;
+}
+
+FFResult IdlerPlugin::SetTime( double time )
+{
+	hostTimeSeen = true;
+	return CFFGLPlugin::SetTime( time );
+}
+
+void IdlerPlugin::SetClockScaleForTest( double scale )
+{
+	clockScale = scale;
+}
+
+void IdlerPlugin::TickClockForTest()
+{
+	UpdateClock();
+}
+
+double IdlerPlugin::ClockScaleForTest() const
+{
+	return clockScale;
+}
+
+double IdlerPlugin::HostSecondsForTest() const
+{
+	return hostSeconds;
 }
 
 void IdlerPlugin::UpdateAudio()

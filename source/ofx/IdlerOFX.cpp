@@ -42,6 +42,9 @@
 #include "ofxsMultiThread.h"
 #include "ofxsProcessing.h"
 
+// After the OFX Support headers, which is where the OFX types come from.
+#include "StoatworksAboutOFX.h"
+
 #include "../Controls.h"
 #include "../Presets.h"
 #include "../Savers.h"
@@ -486,6 +489,10 @@ void IdlerOFXPlugin::applyPreset( int presetIndex, double time )
 
 void IdlerOFXPlugin::changedParam( const OFX::InstanceChangedArgs& args, const std::string& name )
 {
+	// The About links open a browser and change nothing about the render.
+	if( stoatworks::about::ofx::changedParam( args, name ) )
+		return;
+
 	if( name == "preset" )
 	{
 		int chosen = 0;
@@ -700,6 +707,11 @@ void describeParams( OFX::ImageEffectDescriptor& desc, bool maskVariant )
 	}
 
 	slider( desc, page, "mix", "Mix", 1.0, "Fades the whole effect back to the clip." );
+
+	// The Stoatworks About block: a read-only credit line and one push button
+	// per link, in a group that starts folded. Last, so it sits under the
+	// effect's own controls.
+	stoatworks::about::ofx::describe( desc, page );
 }
 
 //---------------------------------------------------------------------------

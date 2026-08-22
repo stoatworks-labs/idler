@@ -193,6 +193,21 @@ enum ParamId : unsigned int
 	// plugin at all, while every offline harness in this repo still passes.
 	PT_ABOUT,
 
+	// One button per link the About block carries -- the guide, the project
+	// page, the source, the funding page -- each of which opens a browser and
+	// stores nothing. How many there are is decided by which URLs
+	// StoatworksAbout.h actually holds, so Idler.cpp static_asserts this run
+	// against `about::kParamCount`: writing a user guide later adds a fourth
+	// button, and without the assert that would silently shift PT_COUNT and
+	// leave the last one undeclared.
+	//
+	// These are FFGL-only, like PT_AUDIO above. IdlerOFX.cpp sizes its array
+	// from PT_COUNT and fills the ids it knows by hand, so the extra slots
+	// simply stay zero there.
+	PT_ABOUT_BUTTON_1,
+	PT_ABOUT_BUTTON_2,
+	PT_ABOUT_BUTTON_3,
+
 	PT_COUNT
 };
 
