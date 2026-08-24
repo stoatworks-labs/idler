@@ -1098,6 +1098,100 @@ bool rasterCheck( int width, int height, const std::string& sheetPath )
 	return ok;
 }
 
+//---------------------------------------------------------------------------
+/// Prove a Speed change does not move the picture.
+///
+/// The time either side of the change is read directly rather than comparing
+/// rendered frames: several savers are periodic, and a periodic picture can
+/// match across a jump for the wrong reason -- it landed a whole number of
+/// cycles away. The number says it outright.
+//---------------------------------------------------------------------------
+int runSpeedTest()
+{
+	int failures = 0;
+
+	auto check = [ &failures ]( const char* what, double got, double want, double tol ) {
+		const bool ok = std::abs( got - want ) <= tol;
+		printf( "speed %-34s got=%-12.6f want=%-12.6f %s\n", what, got, want, ok ? "ok" : "FAILED" );
+		if( !ok )
+			++failures;
+	};
+
+	// Slider positions, not cycles per second.
+	struct Step
+	{
+		const char* name;
+		float slider;
+	};
+	const Step steps[] = {
+		{ "default -> 0.10 (slower)", 0.10f },
+		{ "0.10 -> 0.95 (much faster)", 0.95f },
+		{ "0.95 -> 0.00 (stopped)", 0.00f },
+		{ "0.00 -> 0.80 (running again)", 0.80f },
+	};
+
+	IdlerPlugin plugin( false );
+	plugin.SetClockScaleForTest( 1.0 );//seconds, said out loud rather than inferred
+
+	// An hour in, which is where the old arithmetic hurt most and where a live
+	// operator actually is when they reach for the slider.
+	double host = 3600.0;
+	plugin.SetTime( host );
+	plugin.TickClockForTest();
+
+	// Untouched, the anchor must leave the old expression exactly as it was --
+	// this is what keeps tools/sweep.py and every rendered-frame test honest.
+	// The plugin's own default is asked for rather than written down here: a
+	// test that hard-codes it goes quietly wrong the day the default moves.
+	check( "untouched == clock * speed", plugin.CurrentTimeForTest(),
+	       host * SpeedFromParam( plugin.GetFloatParameter( PT_SPEED ) ), 1e-3 );
+
+	for( const Step& step : steps )
+	{
+		const float before = plugin.CurrentTimeForTest();
+
+		// The same instant, a new speed: nothing about the clock has moved, so
+		// nothing about the picture may either.
+		plugin.SetFloatParameter( PT_SPEED, step.slider );
+		plugin.TickClockForTest();
+		check( step.name, plugin.CurrentTimeForTest(), before, 1e-3 );
+
+		// And then it must actually run at the new rate.
+		const float resumed = plugin.CurrentTimeForTest();
+		host += 1.0;
+		plugin.SetTime( host );
+		plugin.TickClockForTest();
+		check( "  one second later", plugin.CurrentTimeForTest() - resumed,
+		       SpeedFromParam( step.slider ), 1e-3 );
+	}
+
+	// Bar sync is deliberately NOT anchored: its contract is that a cycle
+	// boundary lands on the bar line, so it must still be the plain transport
+	// product. If the anchor ever leaks into it, beat sync stops meaning
+	// anything.
+	{
+		IdlerPlugin bar( false );
+		bar.SetClockScaleForTest( 1.0 );
+		bar.SetFloatParameter( PT_SYNC, static_cast< float >( Sync::Bar ) );
+		bar.SetBeatInfo( 120.0f, 0.25f );//120bpm: a bar is two seconds
+		bar.SetTime( 8.0 );
+		bar.TickClockForTest();
+		const float before = bar.CurrentTimeForTest();
+
+		bar.SetFloatParameter( PT_SPEED, 0.95f );
+		bar.TickClockForTest();
+		const float after = bar.CurrentTimeForTest();
+
+		const bool jumped = std::abs( after - before ) > 1e-3;
+		printf( "speed %-34s %s\n", "Bar sync still re-locks", jumped ? "ok" : "FAILED" );
+		if( !jumped )
+			++failures;
+	}
+
+	printf( "%s\n", failures == 0 ? "speed: all ok" : "speed: FAILURES" );
+	return failures == 0 ? 0 : 1;
+}
+
 void usage()
 {
 	printf(
@@ -1110,6 +1204,7 @@ void usage()
 		"  --replay          the replay cache does not change the answer\n"
 		"  --coverage        every saver draws something, at several times\n"
 		"  --walk            the maze walk roams rather than pacing a few cells\n"
+		"  --speed           a Speed change does not move the picture\n"
 		"  --raster          the software rasteriser agrees with the GL one\n"
 		"  --raster-sheet P  and write a GL-vs-software comparison sheet\n"
 		"  --effect          render the effect variant over a test clip\n"
@@ -1140,6 +1235,7 @@ int main( int argc, char** argv )
 	bool wantReplay   = false;
 	bool wantCoverage = false;
 	bool wantWalk     = false;
+	bool wantSpeed    = false;
 	bool wantEffect   = false;
 
 	float time  = 12.0f;
@@ -1185,6 +1281,8 @@ int main( int argc, char** argv )
 			wantCoverage = true;
 		else if( argument == "--walk" )
 			wantWalk = true;
+		else if( argument == "--speed" )
+			wantSpeed = true;
 		else if( argument == "--effect" )
 			wantEffect = true;
 		else if( argument == "--time" )
@@ -1228,11 +1326,16 @@ int main( int argc, char** argv )
 	}
 
 	if( outPath.empty() && sheetPath.empty() && sequenceDir.empty() && !wantList && !wantGeometry &&
-	    !wantReplay && !wantCoverage && !wantRaster && !wantWalk )
+	    !wantReplay && !wantCoverage && !wantRaster && !wantWalk && !wantSpeed )
 	{
 		usage();
 		return 1;
 	}
+
+	// Ahead of the GL context on purpose: this one needs no GPU, so it still
+	// runs on a machine that cannot make a context at all.
+	if( wantSpeed )
+		return runSpeedTest();
 
 	CGLContextObj context = createContext();
 	if( context == nullptr )

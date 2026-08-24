@@ -121,6 +121,13 @@ for NAME in "Idler" "Idler Mask"; do
 done
 
 #-----------------------------------------------------------------------------
+step "speed -- a Speed change does not move the picture"
+#-----------------------------------------------------------------------------
+# Needs no GPU, so it sits ahead of everything that does: a machine that cannot
+# make a GL context can still run it.
+if "$BUILD/idtest" --speed; then ok "speed"; else bad "speed"; fi
+
+#-----------------------------------------------------------------------------
 step "geometry -- the mesh each saver builds"
 #-----------------------------------------------------------------------------
 if "$BUILD/idtest" --geometry; then ok "geometry"; else bad "geometry"; fi

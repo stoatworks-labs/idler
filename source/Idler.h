@@ -180,9 +180,9 @@ private:
 	// The FFGL header never says what unit SetTime is in, and hosts disagree:
 	// Resolume hands over MILLISECONDS (measured live: 20.0 per frame at its
 	// 50 fps, and the SDK's own Particles sample divides by 1000), while the
-	// offline harness sends seconds. UpdateClock decides from the first
-	// plausible frame delta and sticks: 0.001..0.5 is a seconds-host frame,
-	// 2..500 is a milliseconds-host frame, anything else keeps waiting.
+	// offline harness sends seconds. UpdateClock calibrates the host's clock
+	// against a steady_clock and lets the ratio name the unit, over several
+	// agreeing frames, failing safe to the wall clock while undecided.
 	// `hostSeconds` is the normalised clock CurrentTime reads.
 	//---------------------------------------------------------------------
 	void UpdateClock();
@@ -201,6 +201,12 @@ public:
 	double ClockScaleForTest() const;
 	double HostSecondsForTest() const;
 
+	/// The time the next frame would be drawn at. `--speed` needs it: the thing
+	/// being tested is that a speed change does NOT move the picture, and
+	/// reading the time either side of one says so directly, where a
+	/// rendered-frame comparison would only say the two frames match.
+	float CurrentTimeForTest() const;
+
 private:
 
 	double clockScale  = 0.0;///< 0 until decided; then 1.0 or 0.001
@@ -211,6 +217,36 @@ private:
 	bool hostTimeSeen   = false;
 	double lastRawTime = -1.0;
 	double hostSeconds = 0.0;
+
+	//---------------------------------------------------------------------
+	// Time continuity across a Speed change.
+	//
+	// The saver's picture stays a pure function of its settings -- that is the
+	// whole design and none of it changes here. What changes is only which
+	// time a given clock reading maps to.
+	//
+	// `time = clock * speed` means a speed change moves the time by
+	// `clock * delta`, and `clock` is however long the composition has been
+	// open. Nudging Speed an hour in is a jump of hundreds of cycles: every
+	// saver leaps to an unrelated point in its animation, which is what orrery
+	// issue #6 reported once the 1000x clock bug was out of the way. So
+	// remember the time reached so far and count from there at the new rate.
+	//
+	// Free only. Beat and Bar deliberately keep jumping: their contract is that
+	// a cycle boundary lands on the host's grid, and an offset that made a
+	// speed change seamless would slide the animation off the grid it exists to
+	// sit on. Manual is driven entirely by the Phase slider, and pinned time
+	// replaces the clock outright -- both keep the anchor following so that
+	// returning to Free resumes rather than leaps. Nor is any of this in the
+	// OpenFX build: that host renders arbitrary times in arbitrary order and
+	// can keyframe Speed, so a running anchor there would make a frame depend
+	// on which frames were rendered before it.
+	//---------------------------------------------------------------------
+	void UpdatePhaseAnchor();
+
+	double phaseAnchor = 0.0; ///< time already reached at `anchorClock`
+	double anchorClock = 0.0; ///< the clock reading that time belongs to
+	float anchorSpeed  = -1.0f;///< speed in force since then; < 0 until the first frame
 
 	//---------------------------------------------------------------------
 	// Audio.

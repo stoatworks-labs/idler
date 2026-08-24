@@ -374,6 +374,14 @@ void IdlerOFXPlugin::render( const OFX::RenderArguments& args )
 	// Saver time. Free runs off the host clock; Manual ignores speed entirely so
 	// Phase is the only driver, which is the mode to keyframe against an edit.
 	// There is no Beat or Bar here — OFX carries no tempo.
+	//
+	// Saver time is `seconds * speed` here and is NOT anchored the way the FFGL
+	// build's is. The anchor exists so that nudging Speed live does not teleport
+	// the picture, and it is a running carry -- which needs frames to arrive in
+	// order. This host renders arbitrary times in arbitrary order and can
+	// keyframe Speed, so an anchor here would make a frame depend on which
+	// frames happened to be rendered before it. A pure product is the right
+	// answer for a timeline; see Idler.h.
 	const double fps      = dstClip->getFrameRate() > 0.0 ? dstClip->getFrameRate() : 25.0;
 	const float seconds   = static_cast< float >( args.time / fps );
 	const int syncMode    = Option( params[ PT_SYNC ], 2 );

@@ -550,6 +550,7 @@ void IdlerPlugin::SetClockScaleForTest( double scale )
 void IdlerPlugin::TickClockForTest()
 {
 	UpdateClock();
+	UpdatePhaseAnchor();
 }
 
 double IdlerPlugin::ClockScaleForTest() const
@@ -560,6 +561,50 @@ double IdlerPlugin::ClockScaleForTest() const
 double IdlerPlugin::HostSecondsForTest() const
 {
 	return hostSeconds;
+}
+
+float IdlerPlugin::CurrentTimeForTest() const
+{
+	return CurrentTime();
+}
+
+//---------------------------------------------------------------------------
+void IdlerPlugin::UpdatePhaseAnchor()
+{
+	const Sync sync   = static_cast< Sync >( Option( params[ PT_SYNC ], static_cast< int >( Sync::Count ) ) );
+	const float speed = SpeedFromParam( params[ PT_SPEED ] );
+
+	// Beat and Bar are meant to jump -- they re-lock to the transport, which is
+	// the point of them. Manual ignores Speed entirely, and a pinned clock has
+	// replaced the host's. Keep the anchor following the clock through all
+	// three so that returning to Free resumes rather than leaps.
+	if( sync != Sync::Free || timePinned )
+	{
+		anchorClock = hostSeconds;
+		anchorSpeed = speed;
+		return;
+	}
+
+	// First frame: leave the anchor at clock zero, time zero. That makes the
+	// expression in CurrentTime identical to the old `hostSeconds * speed` for
+	// as long as nobody touches Speed, which is what keeps every rendered-frame
+	// test and tools/sweep.py measuring the same thing they measured before.
+	if( anchorSpeed < 0.0f )
+	{
+		anchorSpeed = speed;
+		return;
+	}
+
+	if( speed != anchorSpeed )
+	{
+		// Once per speed change, not once per frame: this carries the exact time
+		// forward rather than integrating it, so a long session cannot
+		// accumulate rounding into a drift. Frame rate still cannot affect what
+		// is on screen.
+		phaseAnchor += ( hostSeconds - anchorClock ) * anchorSpeed;
+		anchorClock = hostSeconds;
+		anchorSpeed = speed;
+	}
 }
 
 void IdlerPlugin::UpdateAudio()
@@ -624,7 +669,10 @@ float IdlerPlugin::CurrentTime() const
 	switch( sync )
 	{
 	case Sync::Free:
-		driven = static_cast< float >( hostSeconds ) * speed;
+		// Not `hostSeconds * speed`: see UpdatePhaseAnchor. Until the operator
+		// has moved Speed this is exactly that product, because the anchor
+		// starts at clock zero with time zero.
+		driven = static_cast< float >( phaseAnchor + ( hostSeconds - anchorClock ) * speed );
 		break;
 
 	case Sync::Beat:
@@ -776,6 +824,7 @@ void IdlerPlugin::Render( int width, int height, GLuint inputTexture, float maxU
 	// setting the spectrum and then rendering with a filter that had never
 	// been run. tools/sweep.py is what found it.
 	UpdateClock();
+	UpdatePhaseAnchor();
 	UpdateAudio();
 
 	const Settings settings = CurrentSettings( width, height );
