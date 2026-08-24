@@ -2999,6 +2999,10 @@ class Maze extends GrowingSaver {
   constructor() {
     super();
     this.cells = new Uint8Array(0);
+    // How many times the walk has left each cell along each heading, indexed
+    // index(cx, cz) * 4 + heading. Part of the walk's state, so it replays with
+    // it. See chooseHeading().
+    this.passes = new Uint32Array(0);
     this.grid = 10;
     this.x = 0; this.z = 0;
     this.previousX = 0; this.previousZ = 0;
@@ -3020,6 +3024,10 @@ class Maze extends GrowingSaver {
   resetState(s, rng) {
     this.grid = Maze.gridSize(s);
     this.generate(rng);
+
+    // One counter per way out of every cell. Cleared here rather than in
+    // generate() because it belongs to the WALK, not to the maze.
+    this.passes = new Uint32Array(this.grid * this.grid * 4);
 
     this.x = rng.below(this.grid);
     this.z = rng.below(this.grid);
@@ -3049,6 +3057,10 @@ class Maze extends GrowingSaver {
     this.previousX = this.x;
     this.previousZ = this.z;
     this.headingIn = this.headingOut;
+
+    // Mark the way out before taking it. This is the whole of what stops the
+    // walk retracing itself for ever — see chooseHeading().
+    this.passes[this.index(this.x, this.z) * 4 + this.headingIn] += 1;
 
     this.x += kHeadingDX[this.headingIn];
     this.z += kHeadingDZ[this.headingIn];
@@ -3319,14 +3331,34 @@ class Maze extends GrowingSaver {
    *
    * Reversing is a last resort, which is what makes the walk read as exploring
    * rather than as pacing up and down one corridor.
+   *
+   * The choice is made among the exits this walk has used LEAST, and that is
+   * what stops it falling into a short loop and staying there. A perfect maze
+   * is a tree, so what it has instead of cycles is dead ends: the walk turns
+   * round at one, and carrying straight on at each junction on the way back is
+   * exactly the corridor it arrived down — so it retraced its approach, hit the
+   * dead end at the far end, and did it again, for minutes. Counting exits
+   * fixes it, because the retrace is by definition the exit just used.
+   *
+   * Counting EXITS rather than CELLS is load bearing: with cell counts the walk
+   * can sit between two dead ends bouncing off each in turn and never spend the
+   * visit that would make the third way out the least visited.
    */
   chooseHeading(cx, cz, arrived, turnBias, rng) {
-    const options = [];
+    let options = [];
     const reverse = (arrived + 2) % 4;
+    let fewest = Infinity;
 
     for (let h = 0; h < 4; h += 1) {
       if (h === reverse) continue;
-      if ((this.cells[this.index(cx, cz)] & kHeadingWall[h]) === 0) options.push(h);
+      if ((this.cells[this.index(cx, cz)] & kHeadingWall[h]) !== 0) continue;
+
+      const used = this.passes[this.index(cx, cz) * 4 + h];
+      if (used < fewest) {
+        fewest = used;
+        options = [];
+      }
+      if (used === fewest) options.push(h);
     }
 
     if (options.length === 0) {
@@ -3339,11 +3371,16 @@ class Maze extends GrowingSaver {
       return reverse;
     }
 
-    // The short-circuit is load bearing: when the straight-ahead corridor is
-    // walled, unit01() is NOT drawn. The C++ has the same short-circuit, and a
-    // port that always drew here would consume one extra number per turn and
-    // grow a different maze from the first junction onwards.
-    const straightOpen = (this.cells[this.index(cx, cz)] & kHeadingWall[arrived]) === 0;
+    // Straight on, if straight on is one of the least-walked ways out. Testing
+    // membership rather than merely "is the wall open" is the whole point: an
+    // open corridor the walk has already been down is not a candidate while an
+    // unwalked one is on offer.
+    //
+    // The short-circuit is load bearing: when straight on is not a candidate,
+    // unit01() is NOT drawn. The C++ has the same short-circuit, and a port
+    // that always drew here would consume one extra number per turn and walk a
+    // different maze from the first junction onwards.
+    const straightOpen = options.indexOf(arrived) >= 0;
     if (straightOpen && rng.unit01() >= turnBias) return arrived;
 
     return options[rng.below(options.length)];

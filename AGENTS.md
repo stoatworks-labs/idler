@@ -221,7 +221,26 @@ The three that matter check different things:
   geometry that lands somewhere. Crude, and it earns its place because the most
   likely way to break one of eleven savers is to make it draw *nothing*, which
   is invisible in a repo where the default saver still works.
+- **`--walk`** follows the 3D Maze camera for twelve minutes of playback,
+  quantises the eye to a cell and requires a window of a hundred ticks to touch
+  at least twelve distinct ones. It exists because of a bug every other check
+  here passed — see below.
 - **`sweep.py`** is the only thing that catches a dead control.
+
+**A contact sheet cannot catch a motion bug, and one got out because of it.**
+Shipped 3D Maze walked into a dead end, turned round, and then preferred to
+carry straight on at every junction on the way back — which, travelling
+backwards, is exactly the corridor it had arrived down. So it retraced its
+approach perfectly, reached the dead end at the other end of it, and did the
+whole thing again. On the factory preset the camera saw fifty of a hundred
+cells in twelve minutes, and spent one of those minutes inside nine of them.
+Every single frame was correct: the geometry was valid, the replay was
+byte-identical, the coverage was lit, the sheet looked like a maze. The picture
+was right and the *walk* was wrong, and nothing here looked at the walk. Fixed
+by counting how often each exit from each cell has been taken and choosing
+among the least-used (`ChooseHeading` in `Maze.cpp`); `--walk` is the check.
+**Count exits, not cells** — with cell counts the walk can sit between two dead
+ends bouncing off each in turn for ever.
 
 **`idtest --sheet` asserts nothing and is the most valuable of the lot.** Every
 real bug found in this repo so far was found by looking at one, not by an

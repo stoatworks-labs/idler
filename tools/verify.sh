@@ -136,6 +136,11 @@ step "replay -- the cache does not change the answer"
 if "$BUILD/idtest" --replay; then ok "replay"; else bad "replay"; fi
 
 #-----------------------------------------------------------------------------
+step "walk -- the maze roams rather than pacing a few cells"
+#-----------------------------------------------------------------------------
+if "$BUILD/idtest" --walk --size 160x90; then ok "walk"; else bad "walk"; fi
+
+#-----------------------------------------------------------------------------
 step "sweep -- no dead controls"
 #-----------------------------------------------------------------------------
 if python3 tools/sweep.py --build "$BUILD"; then ok "sweep"; else bad "sweep"; fi

@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <cstdint>
 #include <vector>
 
 #include "../Savers.h"
@@ -7,7 +8,8 @@
     3D Maze.
 
     A first-person walk down brick corridors, taking whatever turning comes up,
-    forever.
+    forever -- and preferring the ways it has walked least, which is what keeps
+    "forever" from meaning "the same eight cells". See ChooseHeading.
 
     ## Why this one needs replay
 
@@ -27,7 +29,8 @@
 
     - **Complexity** -- the maze, 6..16 cells on a side.
     - **Density** -- how often the walk prefers a turn over carrying straight
-      on. Low is long corridors; high is a fidget.
+      on, where both are equally unexplored. Low is long corridors; high is a
+      fidget. It cannot buy a retrace: see ChooseHeading.
     - **Size** -- corridor width against wall height, so the corridor can be a
       tunnel or a hall.
     - **Fog** -- how far down the corridor you can see. This is the control
@@ -103,6 +106,12 @@ protected:
 		grid = GridSize( s );
 		Generate( rng );
 
+		// One counter per way out of every cell. Cleared here rather than in
+		// Generate because it belongs to the WALK, not to the maze: a replay
+		// that rebuilt the maze and kept the counts would take different
+		// turnings from a cold run and the frame would not be reproducible.
+		passes.assign( static_cast< size_t >( grid ) * static_cast< size_t >( grid ) * 4U, 0U );
+
 		x = rng.Below( grid );
 		z = rng.Below( grid );
 
@@ -137,6 +146,10 @@ protected:
 		previousX = x;
 		previousZ = z;
 		headingIn = headingOut;
+
+		// Mark the way out before taking it. This is the whole of what stops
+		// the walk retracing itself for ever -- see ChooseHeading.
+		++passes[ Index( x, z ) * 4U + static_cast< size_t >( headingIn ) ];
 
 		x += kHeadingDX[ headingIn ];
 		z += kHeadingDZ[ headingIn ];
@@ -445,21 +458,61 @@ private:
 		return count == 0 ? 0 : options[ rng.Below( count ) ];
 	}
 
-	/// Where to go on leaving `(cx, cz)`, having arrived along `arrived`.
-	///
-	/// Reversing is a last resort, which is what makes the walk read as
-	/// exploring rather than as pacing up and down one corridor.
+	/**
+	    Where to go on leaving `(cx, cz)`, having arrived along `arrived`.
+
+	    Reversing is a last resort, which is what makes the walk read as
+	    exploring rather than as pacing up and down one corridor.
+
+	    **The choice is made among the exits this walk has used LEAST**, and
+	    that is not a refinement -- it is what stops the walk falling into a
+	    short loop and staying there for the rest of the clip.
+
+	    A perfect maze is a tree, so it has no cycles to go round; what it has
+	    instead is dead ends, and the way the walk used to bounce off one was
+	    the bug. It turned round, and then at every junction on the way back it
+	    preferred to carry straight on -- which, travelling backwards, is
+	    exactly the corridor it originally came down. So it retraced its
+	    approach perfectly, reached the dead end at the far end of it, turned
+	    round, and retraced again. Escaping needed a turn at a junction, which
+	    is `turnBias` per junction and only 0.1 of one at low Density, so the
+	    camera could ping-pong along the same eight cells for MINUTES. Measured
+	    on the shipped 3D Maze preset, some two-minute stretches saw four cells.
+
+	    Counting how often each exit has been taken fixes it outright, because
+	    the retrace is by definition the exit that has just been used and the
+	    branch it skipped past is the one that has not. Counting **exits**
+	    rather than **cells** matters: with cell counts the walk can sit
+	    between two dead ends bouncing off each in turn -- each bounce makes
+	    the other the less-visited of the two -- and never spend the visit that
+	    would make the third way out the least visited. Per-exit counts cannot
+	    do that, because the bounce spends the count on the way it just went.
+
+	    `turnBias` still decides between exits that are equally unexplored,
+	    which is what it does on fresh ground -- so Density still lengthens the
+	    corridors, it just cannot buy a retrace with them.
+	*/
 	int ChooseHeading( int cx, int cz, int arrived, float turnBias, Random& rng ) const
 	{
 		int options[ 4 ];
 		int count         = 0;
 		const int reverse = ( arrived + 2 ) % 4;
+		uint32_t fewest   = UINT32_MAX;
 
 		for( int h = 0; h < 4; ++h )
 		{
 			if( h == reverse )
 				continue;
-			if( ( cells[ Index( cx, cz ) ] & kHeadingWall[ h ] ) == 0 )
+			if( ( cells[ Index( cx, cz ) ] & kHeadingWall[ h ] ) != 0 )
+				continue;
+
+			const uint32_t used = Passes( cx, cz, h );
+			if( used < fewest )
+			{
+				fewest = used;
+				count  = 0;
+			}
+			if( used == fewest )
 				options[ count++ ] = h;
 		}
 
@@ -474,14 +527,34 @@ private:
 			return reverse;
 		}
 
-		const bool straightOpen = ( cells[ Index( cx, cz ) ] & kHeadingWall[ arrived ] ) == 0;
+		// Straight on, if straight on is one of the least-walked ways out.
+		// Testing membership rather than merely "is the wall open" is the
+		// whole point: an open corridor the walk has already been down is not
+		// a candidate while an unwalked one is on offer.
+		bool straightOpen = false;
+		for( int i = 0; i < count; ++i )
+			straightOpen = straightOpen || ( options[ i ] == arrived );
+
 		if( straightOpen && rng.Unit01() >= turnBias )
 			return arrived;
 
 		return options[ rng.Below( count ) ];
 	}
 
+	/// How many times the walk has left `(cx, cz)` along `heading`.
+	uint32_t Passes( int cx, int cz, int heading ) const
+	{
+		return passes[ Index( cx, cz ) * 4U + static_cast< size_t >( heading ) ];
+	}
+
 	std::vector< uint8_t > cells;
+
+	/// How many times the walk has left each cell along each heading, indexed
+	/// `Index( cx, cz ) * 4 + heading`. Part of the walk's state, so it is
+	/// replayed with it; at most 16x16x4 counters, and a counter cannot pass
+	/// `kMaxReplaySteps`.
+	std::vector< uint32_t > passes;
+
 	int grid = 10;
 
 	int x = 0, z = 0;

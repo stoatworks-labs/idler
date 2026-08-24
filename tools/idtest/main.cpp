@@ -56,6 +56,7 @@
 #include <cstring>
 #include <map>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "Controls.h"
@@ -502,6 +503,122 @@ bool runGeometry( int width, int height )
 			printf( "    %d non-finite positions\n", nonFinite );
 		if( mesh.Empty() )
 			printf( "    empty mesh\n" );
+
+		ok = ok && pass;
+	}
+
+	plugin.DeInitGL();
+	releaseSurface( surface );
+	return ok;
+}
+
+/**
+    The maze walk has to keep going somewhere.
+
+    This is the check for a bug that every other test in here passed. The walk
+    turns round at a dead end, and it used to prefer carrying straight on at
+    each junction on the way back -- which, travelling backwards, is exactly
+    the corridor it arrived down. So it retraced its approach perfectly, hit
+    the dead end at the other end of it, and did it again: the camera
+    ping-ponged along the same handful of cells for minutes at a time. Every
+    frame was correct, the replay was byte-identical, the geometry was valid
+    and the coverage was lit. It just was not going anywhere.
+
+    So measure where the camera has BEEN. The eye comes out of the view matrix
+    -- `eye = -R^T t` -- quantises to a cell, and a window of consecutive ticks
+    has to touch more than a handful of distinct ones. Before the fix the worst
+    window here saw three cells; after it, twenty.
+
+    Sampled a tick apart because a tick is a cell of travel: sampling per frame
+    would count the same cell dozens of times and say nothing.
+*/
+bool runWalk( int width, int height )
+{
+	// Each case is a maze size and a turn preference. Low Density is the one
+	// that used to trap, because it is the setting that most wants to carry
+	// straight on -- and the shipped 3D Maze preset sits near it.
+	struct Case
+	{
+		float seed;
+		float density;
+		float complexity;
+	};
+	const Case cases[] = {
+		{ 0.00f, 0.00f, 0.40f },// the worst case for the old rule
+		{ 0.37f, 0.40f, 0.40f },// the factory 3D Maze preset
+		{ 0.71f, 1.00f, 1.00f },// the largest maze, most fidgety walk
+	};
+
+	// A tick is one cell of travel; see Maze.cpp.
+	constexpr float kTickRate = 1.6f;
+	constexpr int kTicks      = 1200;// 12 minutes of playback
+	constexpr int kWindow     = 100; // ~1 minute
+	constexpr int kFloor      = 12;  // distinct cells that window must touch
+
+	Surface surface = makeSurface( width, height );
+
+	IdlerPlugin plugin( false );
+	if( !prepare( plugin, width, height ) )
+		return false;
+
+	bool ok = true;
+
+	for( const Case& test : cases )
+	{
+		plugin.SetFloatParameter( PT_SAVER, static_cast< float >( SaverKind::Maze ) );
+		plugin.SetFloatParameter( PT_SEED, test.seed );
+		plugin.SetFloatParameter( PT_DENSITY, test.density );
+		plugin.SetFloatParameter( PT_COMPLEXITY, test.complexity );
+
+		std::vector< std::pair< int, int > > cells;
+		cells.reserve( kTicks );
+
+		for( int tick = 0; tick < kTicks; ++tick )
+		{
+			// Mid-tick, so the camera is between two cells rather than sitting
+			// exactly on the boundary where the rounding could go either way.
+			plugin.SetTimeOverride( ( static_cast< float >( tick ) + 0.5f ) / kTickRate );
+			render( plugin, surface );
+
+			const float* m = plugin.LastScene().view.m;
+			const float eyeX =
+				-( m[ 0 ] * m[ 12 ] + m[ 1 ] * m[ 13 ] + m[ 2 ] * m[ 14 ] );
+			const float eyeZ =
+				-( m[ 8 ] * m[ 12 ] + m[ 9 ] * m[ 13 ] + m[ 10 ] * m[ 14 ] );
+
+			cells.emplace_back( static_cast< int >( std::floor( eyeX ) ),
+			                    static_cast< int >( std::floor( eyeZ ) ) );
+		}
+
+		int worst      = kWindow + 1;
+		int worstStart = 0;
+		for( size_t start = 0; start + kWindow <= cells.size(); ++start )
+		{
+			std::vector< std::pair< int, int > > window( cells.begin() + static_cast< long >( start ),
+			                                             cells.begin() + static_cast< long >( start + kWindow ) );
+			std::sort( window.begin(), window.end() );
+			const int distinct =
+				static_cast< int >( std::unique( window.begin(), window.end() ) - window.begin() );
+			if( distinct < worst )
+			{
+				worst      = distinct;
+				worstStart = static_cast< int >( start );
+			}
+		}
+
+		std::vector< std::pair< int, int > > all = cells;
+		std::sort( all.begin(), all.end() );
+		const int seen = static_cast< int >( std::unique( all.begin(), all.end() ) - all.begin() );
+
+		const bool pass = worst >= kFloor;
+		printf( "3D Maze  seed %.2f  density %.2f  complexity %.2f   %d cells in %d ticks, "
+		        "worst %d-tick window %d (from tick %d)  %s\n",
+		        static_cast< double >( test.seed ), static_cast< double >( test.density ),
+		        static_cast< double >( test.complexity ), seen, kTicks, kWindow, worst, worstStart,
+		        pass ? "ok" : "FAIL" );
+
+		if( !pass )
+			printf( "    the walk is stuck: fewer than %d distinct cells in a window\n", kFloor );
 
 		ok = ok && pass;
 	}
@@ -992,6 +1109,7 @@ void usage()
 		"  --geometry        the mesh each saver builds, checked\n"
 		"  --replay          the replay cache does not change the answer\n"
 		"  --coverage        every saver draws something, at several times\n"
+		"  --walk            the maze walk roams rather than pacing a few cells\n"
 		"  --raster          the software rasteriser agrees with the GL one\n"
 		"  --raster-sheet P  and write a GL-vs-software comparison sheet\n"
 		"  --effect          render the effect variant over a test clip\n"
@@ -1021,6 +1139,7 @@ int main( int argc, char** argv )
 	std::string rasterSheet;
 	bool wantReplay   = false;
 	bool wantCoverage = false;
+	bool wantWalk     = false;
 	bool wantEffect   = false;
 
 	float time  = 12.0f;
@@ -1064,6 +1183,8 @@ int main( int argc, char** argv )
 			wantReplay = true;
 		else if( argument == "--coverage" )
 			wantCoverage = true;
+		else if( argument == "--walk" )
+			wantWalk = true;
 		else if( argument == "--effect" )
 			wantEffect = true;
 		else if( argument == "--time" )
@@ -1107,7 +1228,7 @@ int main( int argc, char** argv )
 	}
 
 	if( outPath.empty() && sheetPath.empty() && sequenceDir.empty() && !wantList && !wantGeometry &&
-	    !wantReplay && !wantCoverage && !wantRaster )
+	    !wantReplay && !wantCoverage && !wantRaster && !wantWalk )
 	{
 		usage();
 		return 1;
@@ -1149,6 +1270,9 @@ int main( int argc, char** argv )
 
 	if( wantReplay && status == 0 )
 		status = runReplay( width, height ) ? 0 : 1;
+
+	if( wantWalk && status == 0 )
+		status = runWalk( width, height ) ? 0 : 1;
 
 	if( !sheetPath.empty() && status == 0 )
 		status = runSheet( sheetPath, 480, 270 ) ? 0 : 1;
