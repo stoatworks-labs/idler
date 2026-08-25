@@ -50,7 +50,9 @@ or reveals, hides or tints the clip *through* it.
 
 ### OpenFX hosts
 
-Copy `Idler.ofx.bundle` into `/Library/OFX/Plugins`. A generator and a matching filter are both in
+Copy `Idler.ofx.bundle` into `/Library/OFX/Plugins` (macOS),
+`C:\Program Files\Common Files\OFX\Plugins` (Windows) or `/usr/OFX/Plugins`
+(Linux). A generator and a matching filter are both in
 the one bundle. An OFX host hands a plugin a buffer rather than a GL context, so that build
 rasterises in software; the savers themselves are the same code, and the two renderers are checked
 against each other. Sync there offers **Free and Manual only**, because OFX carries no tempo —
