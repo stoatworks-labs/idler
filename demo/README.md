@@ -107,7 +107,7 @@ The transport's **Plugin** dropdown chooses between `Idler` (the source) and
 `Idler Mask` (the effect), which in the repo are two bundles from one class and
 one constructor flag.
 
-Switching it re-applies **Background Opacity**'s constructor default — 1 on the
+Switching it re-applies **Background Alpha**'s constructor default — 1 on the
 source, 0 on the effect. That is not a page invention: switching variant is
 instantiating the other plugin, and a fresh `Idler Mask` really does start with a
 transparent background. Without it the effect comes up with an opaque background

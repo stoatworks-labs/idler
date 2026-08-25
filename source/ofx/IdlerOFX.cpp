@@ -691,7 +691,7 @@ void describeParams( OFX::ImageEffectDescriptor& desc, bool maskVariant )
 
 	// The generator wants opaque black; the filter wants none, or it covers the
 	// clip it exists to draw over. Same split as the FFGL build.
-	slider( desc, page, "backOpacity", "Background Opacity", maskVariant ? 0.0 : 1.0,
+	slider( desc, page, "backOpacity", "Background Alpha", maskVariant ? 0.0 : 1.0,
 	        "0 puts the saver over transparency, which is what the mask modes and a layer above "
 	        "want." );
 

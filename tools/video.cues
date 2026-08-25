@@ -51,7 +51,7 @@
 0 Fog=0.0
 0 Colour Mode=0
 0 Opacity=1.0
-0 Background Opacity=1.0
+0 Background Alpha=1.0
 
 # The trail lengthens as the shot settles, which is the control worth showing
 # first because it is the one that makes Mystify look like Mystify.

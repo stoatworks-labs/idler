@@ -136,7 +136,7 @@ audio-driven clock cannot be scrubbed and cannot be a pure function of time. It
 is separate from Speed, and it defaults to zero, so nothing else loses the
 property by accident.
 
-**The effect variant must default Background Opacity to 0, and the source to 1.**
+**The effect variant must default Background Alpha to 0, and the source to 1.**
 They are the same class with one flag, so it is natural to give them the same
 defaults, and v0.1.0 shipped doing exactly that. An opaque black background
 covers the clip the effect exists to draw over: Over looks like the effect

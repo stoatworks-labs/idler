@@ -66,7 +66,7 @@ at all and which GLEW arrives through — without it the FFGL configure fails
 outright. `~/Projects/.release-vm/*.ps1` are the scripts that did it.
 
 **Porting found a bug in the shipped v0.1.0:** the *effect* variant defaulted
-Background Opacity to 1 like the source, so an opaque black background covered
+Background Alpha to 1 like the source, so an opaque black background covered
 the clip it exists to draw over — Over looked like a replace, and Reveal, Hide
 and Colourise were all no-ops (scene alpha 1 everywhere, nothing to cut
 against). Effect now defaults to 0, and **presets skip the background on the

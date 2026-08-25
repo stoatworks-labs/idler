@@ -73,7 +73,7 @@ alone gives you that saver driven by whatever the sliders happen to say — see
 - **A saver never touches OpenGL.** It fills a `Scene`: a camera, a shading
   mode, and one triangle mesh. Eleven savers, one draw call — and the OFX build
   rasterises the same `Scene` in software rather than reimplementing anything.
-- **The effect variant defaults Background Opacity to 0, the source to 1.** An
+- **The effect variant defaults Background Alpha to 0, the source to 1.** An
   opaque background covers the clip the effect exists to draw over, and makes
   every mask mode a no-op. Presets skip the background on the effect for the
   same reason they skip Mask Mode.

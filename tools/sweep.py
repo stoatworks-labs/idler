@@ -94,7 +94,7 @@ CONTROLS = [
     ("Background",         [], DEFAULT_VALUES),
     ("Background_Green",   [], DEFAULT_VALUES),
     ("Background_Blue",    [], DEFAULT_VALUES),
-    ("Background Opacity", [], DEFAULT_VALUES),
+    ("Background Alpha", [], DEFAULT_VALUES),
 
     # Hue Spread only bites in Spread mode, and Hue Cycle only in Spread or
     # Cycle. Both are sweeps that need a second parameter set first, which is
