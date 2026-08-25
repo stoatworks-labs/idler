@@ -267,6 +267,15 @@ if(BUILD_OFX)
     # expects. Hardcoding a name there builds, loads and renders perfectly and
     # then fails codesign at release time -- see the comment in that file.
     set(OFX_BUNDLE_IDENTIFIER "com.stoatworks.idler")
+    # Threads, explicitly. The OFX Support library's multi-thread suite calls
+    # pthread_create, and on Rocky 8 -- glibc 2.28, the floor Resolve supports
+    # -- that still lives in libpthread; libpthread was only folded into libc in
+    # glibc 2.34. Leave it out and the plugin compiles, links, passes a symbol
+    # check and a glibc-version check, and then fails at dlopen with "undefined
+    # symbol: pthread_create". macOS and Windows never show it.
+    find_package(Threads REQUIRED)
+    target_link_libraries(IdlerOFX PRIVATE Threads::Threads)
+
     set(OFX_BUNDLE_DIR "${CMAKE_BINARY_DIR}/Idler.ofx.bundle")
     set_target_properties(IdlerOFX PROPERTIES
         PREFIX ""
@@ -285,6 +294,12 @@ if(BUILD_OFX)
             RUNTIME_OUTPUT_DIRECTORY_RELEASE "${OFX_BUNDLE_DIR}/Contents/Win64"
             ARCHIVE_OUTPUT_DIRECTORY "${OFX_BUNDLE_DIR}/importlib"
         )
+    else()
+        # "Linux-x86-64" is the architecture name the OFX spec gives this, and
+        # a host that does not find the binary under exactly that path simply
+        # does not see the plugin -- there is no error to read.
+        set_target_properties(IdlerOFX PROPERTIES
+            LIBRARY_OUTPUT_DIRECTORY "${OFX_BUNDLE_DIR}/Contents/Linux-x86-64")
     endif()
 endif()
 
