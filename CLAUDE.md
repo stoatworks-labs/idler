@@ -55,6 +55,13 @@ alone gives you that saver driven by whatever the sliders happen to say — see
 - The mesh each saver builds: `./build/idtest --geometry`
 - Every saver draws something: `./build/idtest --coverage`
 - No dead controls: `python3 tools/sweep.py`
+- **Before a release**, the shipped Windows artefact in a real Arena:
+  `../plugin-bench/arena/gate.sh idler` — loads the actual `.dll` on the win-lab
+  VM and checks registration, the control surface the host sees, FFGL's
+  16-char name truncation, and that every control still moves the picture.
+  Takes minutes, needs the VM, and is deliberately NOT in `tools/verify.sh`.
+  Its expectation lives at `plugin-bench/arena/expect/idler.json`, so a
+  deliberate change to the controls changes that file too.
 - The software rasteriser agrees with GL: `./build/idtest --raster`
 - ...and look at the difference: `--raster-sheet /tmp/raster.png`
 
