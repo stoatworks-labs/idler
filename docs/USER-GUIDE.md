@@ -27,9 +27,13 @@ OpenFX plugin for Resolve, Nuke and Natron.
 > frame reached by replaying the clock is **byte-identical** to the same frame rendered cold.
 >
 > **Both plugins have been loaded into Resolume and run, and all eleven savers render there.**
+> The **Windows** build is checked in a real Arena 7.27.1 at every release now, rather than only
+> compiled: it loads, both plugins register with the right name, uid and category, and all 39
+> controls the host reports match the ones declared — name, order, type, range and default.
 > Still untested: bar sync against a real transport, how the parameter groups land in the
-> inspector, Windows (built, never run), and the OpenFX build in a real OFX host. It has never
-> been used on a live show.
+> inspector, and the OpenFX build in a real OFX host. That release check runs on software
+> rendering and on a machine with no sound device, so it says nothing about a vendor driver or
+> about the audio-driven controls. It has never been used on a live show.
 >
 > This codebase was created with AI assistance, directed and reviewed by a human author.
 
