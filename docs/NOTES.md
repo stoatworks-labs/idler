@@ -82,8 +82,11 @@ guarantees `glLineWidth` 1.0, which is what macOS gives.
 the release** — the first time in this fleet that a plugin reached a real host
 ahead of its tag, so the docs say so instead of the usual "never loaded into
 Resolume". Still unverified there: **Bar sync against a real transport**, and how
-the parameter groups land in the inspector. Never used on a live show; Windows
-built in CI, never run.
+the parameter groups land in the inspector. Never used on a live show. Windows is
+built in CI and, since the release check was added, **loaded into a real Arena
+7.27.1 at every release** — both plugins register correctly and all 39 reported
+controls match the declared ones. That runs on software rendering and on a
+machine with no sound device.
 
 Verified 13/13 by `tools/verify.sh` (universal build, `plugMain`,
 `CFBundleExecutable`, ad-hoc codesign, geometry, coverage, replay, 64

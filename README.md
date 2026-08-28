@@ -166,7 +166,11 @@ What that does **not** cover, and you should assume is untested:
 - **Bar sync has not been checked against a real transport**, and how the
   parameter groups land in the inspector has not been reviewed.
 - **It has never been used on a live show.**
-- **Windows is built but never run.**
+- **The Windows build is loaded into a real Arena 7.27.1 at every release**, not
+  only compiled: both plugins register with the right name, uid and category,
+  and all 39 controls the host reports match the ones declared — name, order,
+  type, range and default. That check runs on software rendering, so it says
+  nothing about a vendor driver, and on a machine with no sound device.
 - **The OpenFX build has never run in Resolve, Nuke or Natron.** It loads and
   renders under `ofxprobe`, a test host, and its software rasteriser is checked
   against the GL one on all eleven savers — but no real OFX host has seen it.
