@@ -148,6 +148,16 @@ step "walk -- the maze roams rather than pacing a few cells"
 if "$BUILD/idtest" --walk --size 160x90; then ok "walk"; else bad "walk"; fi
 
 #-----------------------------------------------------------------------------
+step "clock -- the host's epoch does not stop the picture"
+#-----------------------------------------------------------------------------
+# Resolume's SetTime is a monotonic clock with an arbitrary epoch, not a clip
+# position. Every test in here used to start its clock at zero, so nothing saw
+# that eleven days of host time puts the growing savers past their replay cap on
+# the first frame -- and a frozen maze with a live interpolation inside it looks
+# like a walk stuck in one corridor, not like a stopped clock.
+if "$BUILD/idtest" --clock --size 160x90; then ok "clock"; else bad "clock"; fi
+
+#-----------------------------------------------------------------------------
 step "sweep -- no dead controls"
 #-----------------------------------------------------------------------------
 if python3 tools/sweep.py --build "$BUILD"; then ok "sweep"; else bad "sweep"; fi

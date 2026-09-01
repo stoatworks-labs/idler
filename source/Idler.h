@@ -197,6 +197,13 @@ public:
 	// the millisecond bug through in the first place.
 	//---------------------------------------------------------------------
 	void SetClockScaleForTest( double scale );
+
+	/// Declare the clock's ORIGIN, for the same reason the scale is declared:
+	/// one absolute time handed over in one frame is as ambiguous about where
+	/// the host's clock started as it is about what unit it is in. A test that
+	/// wants to be an hour into a session says so.
+	void SetClockOriginForTest( double origin );
+
 	void TickClockForTest();
 	double ClockScaleForTest() const;
 	double HostSecondsForTest() const;
@@ -217,6 +224,12 @@ private:
 	bool hostTimeSeen   = false;
 	double lastRawTime = -1.0;
 	double hostSeconds = 0.0;
+
+	/// The smallest raw host time seen, in the host's own units, and the origin
+	/// every later one is measured from. See the note in UpdateClock: the unit
+	/// was measured, the ORIGIN was assumed, and Resolume's is not zero.
+	double clockOrigin      = 0.0;
+	bool clockOriginKnown   = false;
 
 	//---------------------------------------------------------------------
 	// Time continuity across a Speed change.

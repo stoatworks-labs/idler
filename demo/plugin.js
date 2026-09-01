@@ -1354,8 +1354,16 @@ class GrowingSaver {
     const t = Math.max(0, s.time);
     const exactTick = t * rate;
 
-    const wantedTick = Math.trunc(Math.min(exactTick, GrowingSaver.kMaxReplaySteps));
-    const alpha = exactTick - Math.floor(exactTick);
+    // The cap applies to the alpha as well as to the tick. Capping only the
+    // tick freezes the STATE while leaving the interpolation inside it running,
+    // so the maze camera slides forward one cell, snaps back and slides again,
+    // for ever, with the heading swinging round each time — which reads as a
+    // walk stuck in one corridor rather than as the stopped picture it is. Past
+    // the cap the picture stops; it should look stopped.
+    const cappedTick = Math.min(exactTick, GrowingSaver.kMaxReplaySteps);
+
+    const wantedTick = Math.trunc(cappedTick);
+    const alpha = cappedTick - Math.floor(cappedTick);
 
     const key = this.growthKey(s);
 

@@ -530,10 +530,46 @@ void IdlerPlugin::UpdateClock()
 		lastRawTime = raw;
 	lastWallTime = wallNow;
 
+	//-----------------------------------------------------------------------
+	// The ORIGIN, which is a separate question from the unit and was the more
+	// expensive one to get wrong.
+	//
+	// The unit above was measured. The origin was assumed to be zero -- that
+	// `SetTime` counts from when the clip started -- and **Resolume's does
+	// not**. It hands over a monotonic clock with an arbitrary epoch: measured
+	// on this machine at 956,833 seconds, eleven days, on an Arena that had
+	// been open for minutes.
+	//
+	// Two things follow, and the first is why the maze looked broken:
+	//
+	// - **The growing savers freeze.** `GrowingSaver` replays from the seed and
+	//   caps that replay at `kMaxReplaySteps` -- 400,000 ticks, 69 hours of
+	//   playback -- so eleven days of host clock lands past the cap on the very
+	//   first frame. The tick stops advancing while the alpha inside it keeps
+	//   cycling, so the maze camera slides forward one cell, snaps back and
+	//   swings its heading round, for ever. It reads exactly like a walk stuck
+	//   in one corridor doing 180s, which is what it was reported as. The diag
+	//   log said so every session: "replay capped at 400000 ticks".
+	// - **Every saver judders.** `Settings::time` is a float, and a float32 at
+	//   956,833 resolves 0.0625 -- so four frames at 60fps share one time value
+	//   and the animation moves in sixteen steps a second.
+	//
+	// So measure the origin too: the smallest raw time seen is zero. Taking the
+	// smallest rather than the first is what makes a host that RESTARTS its
+	// clock -- a looping clip, a retrigger -- land back at zero and start the
+	// maze again, rather than spending the first loop at a negative time.
+	//-----------------------------------------------------------------------
+	if( raw >= 0.0 && ( !clockOriginKnown || raw < clockOrigin ) )
+	{
+		clockOrigin      = raw;
+		clockOriginKnown = true;
+	}
+
 	// Until the unit is settled -- and for a host that never calls SetTime at
 	// all -- run on the real clock. Wrong in origin but right in rate, where
 	// assuming seconds would be a thousand times fast on Resolume.
-	hostSeconds = ( raw >= 0.0 && clockScale != 0.0 ) ? raw * clockScale : wallNow - wallStart;
+	hostSeconds = ( raw >= 0.0 && clockScale != 0.0 ) ? ( raw - clockOrigin ) * clockScale
+	                                                  : wallNow - wallStart;
 }
 
 FFResult IdlerPlugin::SetTime( double time )
@@ -545,6 +581,12 @@ FFResult IdlerPlugin::SetTime( double time )
 void IdlerPlugin::SetClockScaleForTest( double scale )
 {
 	clockScale = scale;
+}
+
+void IdlerPlugin::SetClockOriginForTest( double origin )
+{
+	clockOrigin      = origin;
+	clockOriginKnown = true;
 }
 
 void IdlerPlugin::TickClockForTest()

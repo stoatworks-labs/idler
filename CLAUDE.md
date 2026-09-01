@@ -54,6 +54,7 @@ alone gives you that saver driven by whatever the sliders happen to say — see
 - The replay cache does not change the answer: `./build/idtest --replay`
 - The mesh each saver builds: `./build/idtest --geometry`
 - Every saver draws something: `./build/idtest --coverage`
+- The host clock's epoch does not stop the picture: `./build/idtest --clock`
 - No dead controls: `python3 tools/sweep.py`
 - **Before a release**, the shipped Windows artefact in a real Arena:
   `../plugin-bench/arena/gate.sh idler` — loads the actual `.dll` on the win-lab
@@ -70,6 +71,11 @@ alone gives you that saver driven by whatever the sliders happen to say — see
   Pipes and Maze — are made pure by deterministic replay from the seed, with a
   cache that must never change the answer. `--replay` demands byte-identical
   frames.
+- **The host clock has an epoch as well as a unit, and Resolume's is not zero** —
+  it hands over a monotonic clock reading eleven days on an Arena open for
+  minutes. Both are measured, never assumed; see `AGENTS.md`. Getting the epoch
+  wrong froze the growing savers on their first frame and looked like a broken
+  maze, not a broken clock.
 - **A saver never touches OpenGL.** It fills a `Scene`: a camera, a shading
   mode, and one triangle mesh. Eleven savers, one draw call — and the OFX build
   rasterises the same `Scene` in software rather than reimplementing anything.

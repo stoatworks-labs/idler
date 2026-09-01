@@ -226,3 +226,50 @@ deciding whether a cell is in or out is a float32-vs-double divergence waiting t
 happen. The preset went from 16,920 triangles to 28,512.
 
 Related: **idler** (above), [hand ported demo verification](https://github.com/stoatworks-labs/fleet-notes/blob/main/notes/reference_hand_ported_demo_verification.md).
+
+## Resolume's SetTime has an epoch, and it is eleven days
+
+*Learned 2026-09-01, an hour after shipping an endless maze that did not fix what was reported*
+
+**The maze in Arena was never walking.** Not because of the walk, and not
+because of the maze — because of the clock. `UpdateClock` measured the host's
+clock *unit* carefully (Resolume sends milliseconds; the ratio against a
+`steady_clock` names it over several voting frames) and then **assumed the
+origin was zero**. Resolume's is not: it hands over a monotonic clock that read
+**956,833 seconds — eleven days — on an Arena that had been open for minutes**.
+
+What that does, and why it does not look like a clock bug:
+
+- `GrowingSaver` caps its replay at `kMaxReplaySteps` (400,000 ticks, 69 hours).
+  Eleven days is past the cap **on the first frame**, so the tick never advances.
+- The **alpha inside the tick was computed from the uncapped time**, so it kept
+  cycling. The maze camera slid forward one cell, snapped back, slid again, and
+  swung its heading round each time. Measured: **1 distinct cell in 300 ticks.**
+- `Settings::time` is a float. A float32 at 956,833 resolves 0.0625, so four
+  frames at 60fps share one time value and everything moves in sixteen steps a
+  second.
+
+The diag log had been saying `replay capped at 400000 ticks; the picture will
+stop advancing` in **every session since at least 2026-08-09**. Nobody read it.
+
+Two fixes, and both were needed:
+
+- **Measure the origin as well as the unit** — the smallest raw time seen is
+  zero. Smallest rather than first, so a host that restarts its clock (a looping
+  clip, a retrigger) lands back at zero rather than spending a loop at a negative
+  time.
+- **Cap the alpha with the tick.** Past the cap the picture stops, and it should
+  *look* stopped. A frozen state with a live interpolation inside it is a far
+  more alarming picture than a still frame, and it is what sent two separate
+  investigations at the maze's turning rule.
+
+**The lesson worth keeping: every test in the harness started its clock at zero.**
+`--time` pins, `--replay` pins, `--geometry` pins, `--walk` pinned. Pinning
+replaces the clock, which is exactly what makes those tests reproducible — and it
+is exactly why none of them could see this. `idtest --clock` drives the real
+`SetTime` from Resolume's actual epoch, in Resolume's actual units, and asserts
+both the arithmetic and that the maze still walks. It fails on the old code with
+"1 cells in 300 ticks".
+
+Related: **3D Maze is an endless maze** (above) — a real bug, found and fixed on
+the way to this one, and not the one that was reported.

@@ -121,6 +121,32 @@ design, and `tools/sweep.py` carries the context table that stops it reporting
 half the parameter list as broken. **Add a saver and that table wants
 revisiting.**
 
+**The host clock has a unit AND an epoch, and they are separate traps.**
+`SetTime` is undocumented in both. The unit is measured against a `steady_clock`
+and voted on over several frames — Resolume sends milliseconds, the harness
+sends seconds. The **epoch** was assumed to be zero for a year, and Resolume's
+is not: it hands over a monotonic clock that read **956,833 seconds — eleven
+days — on an Arena that had been open for minutes**. `UpdateClock` now measures
+that too, taking the smallest raw time seen as the origin. Smallest rather than
+first, so a host that restarts its clock (a looping clip, a retrigger) lands
+back at zero instead of spending a loop at a negative time.
+
+Getting the epoch wrong did not look like a clock bug, which is why it survived
+so long. It looked like a broken saver:
+
+- **The growing savers freeze.** Eleven days is past `kMaxReplaySteps` on the
+  very first frame, so the tick stops advancing. The alpha inside the tick did
+  not, so the maze camera slid forward one cell, snapped back and swung its
+  heading round for ever — reported, twice, as "the maze is stuck doing 180s".
+  The cap now applies to the alpha as well: past it the picture stops, and it
+  looks stopped.
+- **Every saver judders.** `Settings::time` is a float, and a float32 at 956,833
+  resolves 0.0625 — four frames at 60fps share one time value.
+
+The diag log said `replay capped at 400000 ticks` every session. Read it.
+`idtest --clock` is the regression test, and it drives the real `SetTime` from
+that epoch rather than pinning, because pinning is what hid this.
+
 **Beat sync recovers a bar count without keeping one** — `round( estimate −
 barPhase )` reconciles the clock's estimate with the exact position inside the
 bar. It can name the wrong *absolute* bar if the transport did not start at

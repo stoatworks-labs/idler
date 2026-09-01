@@ -19,9 +19,19 @@ void GrowingSaver::Build( const Settings& settings, Scene& scene )
 	const float t          = std::max( 0.0f, settings.time );
 	const double exactTick = static_cast< double >( t ) * static_cast< double >( rate );
 
-	const int wantedTick = static_cast< int >(
-		std::min( exactTick, static_cast< double >( kMaxReplaySteps ) ) );
-	const float alpha = static_cast< float >( exactTick - std::floor( exactTick ) );
+	// The cap applies to the alpha as well as to the tick, and that is not
+	// tidiness. Capping only the tick freezes the STATE while leaving the
+	// interpolation inside it running, so the maze camera slides forward one
+	// cell, snaps back to where it started and slides again -- for ever, with
+	// the heading swinging round each time. That reads as a walk stuck in one
+	// corridor turning on the spot, which is a far more alarming picture than
+	// the frozen frame it actually is, and it is what a mis-scaled host clock
+	// looked like from the outside for a month. Past the cap the picture stops;
+	// it should look stopped.
+	const double cappedTick = std::min( exactTick, static_cast< double >( kMaxReplaySteps ) );
+
+	const int wantedTick = static_cast< int >( cappedTick );
+	const float alpha    = static_cast< float >( cappedTick - std::floor( cappedTick ) );
 
 	const uint64_t key = GrowthKey( settings );
 

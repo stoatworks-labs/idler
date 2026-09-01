@@ -657,6 +657,145 @@ bool runWalk( int width, int height )
 }
 
 /**
+    The host clock's ORIGIN, which is a different question from its unit.
+
+    The unit was measured and has been right for a year. The origin was
+    *assumed* -- that `SetTime` counts from when the clip started -- and
+    Resolume's does not: it hands over a monotonic clock with an arbitrary
+    epoch, measured on the development machine at 956,833 seconds. Eleven days,
+    on an Arena that had been open for minutes.
+
+    Nothing in the harness caught it, because every test here starts its clock
+    at zero. What it did to the picture:
+
+    - **The growing savers froze.** `GrowingSaver` caps its replay at
+      `kMaxReplaySteps`, so eleven days of host clock is past the cap on the
+      first frame. The tick stopped advancing -- and the alpha inside it did
+      not -- so the maze camera slid forward one cell, snapped back and swung
+      its heading round, for ever. It was reported as "the maze is stuck in the
+      same section doing 180s", and it was not the maze.
+    - **Everything juddered.** `Settings::time` is a float, and a float32 at
+      956,833 resolves 0.0625, so four frames at 60fps shared one time value.
+
+    So this drives the real clock -- `SetTime`, not the pin -- from an epoch
+    eleven days out, and asks for both halves:
+
+    - the normalised clock starts at zero and advances a second per second,
+      in seconds and in Resolume's milliseconds;
+    - the maze **actually walks**, measured the way `--walk` measures it. That
+      is the end-to-end one: it fails on the plain product however carefully
+      the arithmetic above is checked.
+*/
+bool runClock( int width, int height )
+{
+	// What Resolume was handing over on the machine this was found on, in its
+	// own units. Any epoch this far out reproduces it; this is the real one.
+	constexpr double kElevenDays = 956833.3125;
+
+	bool ok = true;
+
+	auto check = [ & ]( const char* what, double got, double want, double tolerance ) {
+		const bool pass = std::abs( got - want ) <= tolerance;
+		printf( "clock %-44s %12.4f  %s\n", what, got, pass ? "ok" : "FAILED" );
+		ok = ok && pass;
+	};
+
+	//-----------------------------------------------------------------------
+	// The arithmetic, in both units a host has ever been seen to use.
+	//-----------------------------------------------------------------------
+	{
+		IdlerPlugin plugin( false );
+		plugin.SetClockScaleForTest( 1.0 );// seconds
+		plugin.SetTime( kElevenDays );
+		plugin.TickClockForTest();
+		check( "seconds: first frame is time zero", plugin.HostSecondsForTest(), 0.0, 1e-6 );
+
+		plugin.SetTime( kElevenDays + 12.0 );
+		plugin.TickClockForTest();
+		check( "seconds: twelve seconds later", plugin.HostSecondsForTest(), 12.0, 1e-6 );
+	}
+
+	{
+		IdlerPlugin plugin( false );
+		plugin.SetClockScaleForTest( 0.001 );// Resolume: milliseconds
+		plugin.SetTime( kElevenDays * 1000.0 );
+		plugin.TickClockForTest();
+		check( "millis: first frame is time zero", plugin.HostSecondsForTest(), 0.0, 1e-6 );
+
+		plugin.SetTime( ( kElevenDays + 12.0 ) * 1000.0 );
+		plugin.TickClockForTest();
+		check( "millis: twelve seconds later", plugin.HostSecondsForTest(), 12.0, 1e-6 );
+	}
+
+	//-----------------------------------------------------------------------
+	// A host that restarts its clock -- a looping clip, a retrigger -- lands
+	// back at zero rather than spending the first loop at a negative time.
+	// This is why the origin is the SMALLEST raw time seen and not the first.
+	//-----------------------------------------------------------------------
+	{
+		IdlerPlugin plugin( false );
+		plugin.SetClockScaleForTest( 1.0 );
+		plugin.SetTime( 40.0 );
+		plugin.TickClockForTest();
+		plugin.SetTime( 0.0 );// the clip looped
+		plugin.TickClockForTest();
+		check( "a looping clip lands back at zero", plugin.HostSecondsForTest(), 0.0, 1e-6 );
+	}
+
+	//-----------------------------------------------------------------------
+	// And the picture. This is the check that matters: the maze has to WALK on
+	// a clock with that epoch, which is the whole of what was broken.
+	//-----------------------------------------------------------------------
+	constexpr float kTickRate = 1.6f;
+	constexpr int kTicks      = 300;
+	constexpr int kFloor      = 40;// distinct cells the walk must reach
+
+	Surface surface = makeSurface( width, height );
+
+	IdlerPlugin plugin( false );
+	if( !prepare( plugin, width, height ) )
+		return false;
+
+	plugin.SetFloatParameter( PT_SAVER, static_cast< float >( SaverKind::Maze ) );
+	plugin.SetClockScaleForTest( 0.001 );// Resolume's unit, on Resolume's epoch
+
+	std::vector< std::pair< int, int > > cells;
+	cells.reserve( kTicks );
+
+	for( int tick = 0; tick < kTicks; ++tick )
+	{
+		const double seconds = kElevenDays + ( static_cast< double >( tick ) + 0.5 ) / kTickRate;
+		plugin.SetTime( seconds * 1000.0 );
+		plugin.TickClockForTest();
+		render( plugin, surface );
+
+		const float* m = plugin.LastScene().view.m;
+		const float eyeX =
+			-( m[ 0 ] * m[ 12 ] + m[ 1 ] * m[ 13 ] + m[ 2 ] * m[ 14 ] );
+		const float eyeZ =
+			-( m[ 8 ] * m[ 12 ] + m[ 9 ] * m[ 13 ] + m[ 10 ] * m[ 14 ] );
+
+		cells.emplace_back( static_cast< int >( std::floor( eyeX ) ),
+		                    static_cast< int >( std::floor( eyeZ ) ) );
+	}
+
+	std::sort( cells.begin(), cells.end() );
+	const int seen = static_cast< int >( std::unique( cells.begin(), cells.end() ) - cells.begin() );
+
+	const bool walked = seen >= kFloor;
+	printf( "clock %-44s %12d  %s\n", "3D Maze walks on an eleven-day epoch", seen,
+	        walked ? "ok" : "FAILED" );
+	if( !walked )
+		printf( "    %d cells in %d ticks -- the replay is capped and the walk is frozen\n",
+		        seen, kTicks );
+	ok = ok && walked;
+
+	plugin.DeInitGL();
+	releaseSurface( surface );
+	return ok;
+}
+
+/**
     The replay cache must not change the answer.
 
     A frame rendered cold and the same frame reached by running the clock up to
@@ -1160,6 +1299,7 @@ int runSpeedTest()
 
 	IdlerPlugin plugin( false );
 	plugin.SetClockScaleForTest( 1.0 );//seconds, said out loud rather than inferred
+	plugin.SetClockOriginForTest( 0.0 );//and the epoch, for the same reason
 
 	// An hour in, which is where the old arithmetic hurt most and where a live
 	// operator actually is when they reach for the slider.
@@ -1200,6 +1340,7 @@ int runSpeedTest()
 	{
 		IdlerPlugin bar( false );
 		bar.SetClockScaleForTest( 1.0 );
+		bar.SetClockOriginForTest( 0.0 );
 		bar.SetFloatParameter( PT_SYNC, static_cast< float >( Sync::Bar ) );
 		bar.SetBeatInfo( 120.0f, 0.25f );//120bpm: a bar is two seconds
 		bar.SetTime( 8.0 );
@@ -1232,6 +1373,7 @@ void usage()
 		"  --replay          the replay cache does not change the answer\n"
 		"  --coverage        every saver draws something, at several times\n"
 		"  --walk            the maze walk roams, and keeps finding new maze\n"
+		"  --clock           the host clock's epoch does not stop the picture\n"
 		"  --speed           a Speed change does not move the picture\n"
 		"  --raster          the software rasteriser agrees with the GL one\n"
 		"  --raster-sheet P  and write a GL-vs-software comparison sheet\n"
@@ -1263,6 +1405,7 @@ int main( int argc, char** argv )
 	bool wantReplay   = false;
 	bool wantCoverage = false;
 	bool wantWalk     = false;
+	bool wantClock    = false;
 	bool wantSpeed    = false;
 	bool wantEffect   = false;
 
@@ -1309,6 +1452,8 @@ int main( int argc, char** argv )
 			wantCoverage = true;
 		else if( argument == "--walk" )
 			wantWalk = true;
+		else if( argument == "--clock" )
+			wantClock = true;
 		else if( argument == "--speed" )
 			wantSpeed = true;
 		else if( argument == "--effect" )
@@ -1354,7 +1499,7 @@ int main( int argc, char** argv )
 	}
 
 	if( outPath.empty() && sheetPath.empty() && sequenceDir.empty() && !wantList && !wantGeometry &&
-	    !wantReplay && !wantCoverage && !wantRaster && !wantWalk && !wantSpeed )
+	    !wantReplay && !wantCoverage && !wantRaster && !wantWalk && !wantClock && !wantSpeed )
 	{
 		usage();
 		return 1;
@@ -1404,6 +1549,9 @@ int main( int argc, char** argv )
 
 	if( wantWalk && status == 0 )
 		status = runWalk( width, height ) ? 0 : 1;
+
+	if( wantClock && status == 0 )
+		status = runClock( width, height ) ? 0 : 1;
 
 	if( !sheetPath.empty() && status == 0 )
 		status = runSheet( sheetPath, 480, 270 ) ? 0 : 1;
