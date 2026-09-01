@@ -116,6 +116,11 @@ The two savers that genuinely grow — **Pipes** and **Maze** — get there by d
 from the seed, so the same composition builds the same pipe network on the show laptop and on the
 rack machine.
 
+**3D Maze has no edges.** The maze is built around the camera as it walks and dropped behind it,
+so there is no far wall to reach and no point at which you are re-walking corridors you have
+already seen. **Complexity** sets the scale of its structure — 6 to 16 cells between junctions —
+rather than how big it is, because it does not have a size.
+
 ---
 
 ## Using Idler Mask
@@ -142,6 +147,12 @@ frame. If you see it, that is a bug worth reporting.
 
 **3D Pipes builds a different network on the other machine.** Check the **Seed** travelled with
 the composition. Replay is deterministic from the seed and nothing else.
+
+**3D Maze or 3D Pipes will not move.** Fixed in v1.0.7. Before it, the plugin assumed the host's
+clock started at zero, and Resolume's does not — it hands over a clock reading days, which put the
+two growing savers past their replay limit on the first frame. The maze looked like a walk stuck in
+one corridor turning on the spot. If you see it, you are on an older build; the plugin's log
+(`~/Library/Logs/idler/`) says `replay capped` when it happens.
 
 ---
 
