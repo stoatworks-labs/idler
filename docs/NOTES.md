@@ -176,3 +176,53 @@ parameter sets at 30Hz while the cue sheet reads as correct. Set each saver's
 scene out in full instead.
 
 Related: **release workflow** (working-practice note, kept in Claude memory), [orrery](https://github.com/stoatworks-labs/orrery/blob/main/docs/NOTES.md) (`orrery`).
+
+## 3D Maze is an endless maze, and the first two fixes were not enough
+
+*Learned 2026-09-01, after the third report of "it isn't going anywhere"*
+
+The maze was one grid of 6..16 cells a side, generated once at reset and walked
+for the rest of the clip. Two separate things made that read as **stuck**, and
+they had to be fixed in that order because the first one hides the second.
+
+1. **The turning rule** (fixed earlier). At a dead end the walk turned round and
+   then preferred to carry straight on at each junction on the way back — which,
+   travelling backwards, is the corridor it arrived down. Preferring the
+   **least-walked exit** fixed it, and `idtest --walk` was written for it.
+2. **The maze itself.** A hundred cells is about a minute of walking, and a
+   *perfect* maze is a tree: exactly one route between any two cells, so every
+   dead end costs a full retrace. Measured on the shipped preset, one tick in
+   fifteen was a 180-degree turn and net displacement after a minute was under
+   three cells. Through fog that shows three cells, that is indistinguishable
+   from being stuck — and no turning rule can fix a maze with an end.
+
+Now the maze is **chunked and infinite**: `chunk × chunk` cells generated as a
+pure function of `(chunkX, chunkZ, seed)`, joined by two doorways per shared
+edge drawn from a stream keyed on the **edge** so both sides agree, and
+**braided** — all but one dead end in six gets one more wall opened, which is
+what turns the tree into a graph with loops. Chunks more than 20 cells from the
+camera are dropped and rebuilt from the seed if the walk returns.
+
+Three things that were not obvious:
+
+- **Chunk generation must draw from its own stream, never the walk's.** How many
+  chunks get built depends on how far the drawing reaches, which depends on
+  **Fog** — and Fog is deliberately not in the growth key. One shared stream and
+  `--replay` fails the moment somebody moves the Fog slider.
+- **Dropping chunks drops their pass counts, and that is fine.** What gets
+  dropped depends only on where the walk has been, so a replay drops exactly
+  what a live run dropped. Deterministic, which is all `--replay` asks.
+- **A window floor cannot catch a finite maze.** `--walk` measured distinct cells
+  in a 100-tick window, and a walk pacing a hundred cells passed it comfortably
+  for months. It now also requires **400+ distinct cells across the whole
+  1200-tick run** — above the 256 the largest old grid could ever hold, so no
+  maze generated once can pass it. The endless one reaches 620–726.
+
+Drawing follows from the same change: the whole maze can no longer be drawn, so
+it is the cells within a disc that follows the fog, minus everything behind the
+camera's own plane. The **disc is measured in whole cells** on purpose — the demo
+is a hand port checked against this one's triangle count, and a float comparison
+deciding whether a cell is in or out is a float32-vs-double divergence waiting to
+happen. The preset went from 16,920 triangles to 28,512.
+
+Related: **idler** (above), [hand ported demo verification](https://github.com/stoatworks-labs/fleet-notes/blob/main/notes/reference_hand_ported_demo_verification.md).

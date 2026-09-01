@@ -8,15 +8,72 @@
     3D Maze.
 
     A first-person walk down brick corridors, taking whatever turning comes up,
-    forever -- and preferring the ways it has walked least, which is what keeps
-    "forever" from meaning "the same eight cells". See ChooseHeading.
+    forever -- and the maze is genuinely endless: it is built in chunks around
+    the camera as it goes, and the ones it has left behind are dropped. There
+    is no edge to reach and no far corner to have seen.
+
+    ## Why it had to be endless
+
+    It used to be one square grid, six to sixteen cells a side, generated once
+    and walked for the rest of the clip. Two things followed, and together they
+    were the bug people actually reported -- "it isn't going anywhere":
+
+    - **A hundred cells is about a minute.** After that every corridor is one
+      the camera has already been down, and since the fog shows two or three
+      cells there is nothing to tell you which minute you are watching.
+    - **A perfect maze is a tree**, so between any two cells there is exactly
+      one route. Every dead end therefore costs a full retrace back down the
+      corridor you came up, and one tick in fifteen was a 180-degree turn on
+      the spot. Measured on the shipped preset, the camera's net displacement
+      after a minute of walking was under three cells. It was pacing.
+
+    Preferring the least-walked exit (see ChooseHeading) was an earlier attempt
+    at this and it is still here, because it is what stops the walk circling a
+    short loop. But no choice of turning fixes a maze with a hundred cells in
+    it, and none of them fixes a tree.
+
+    ## How the maze is endless
+
+    Space is divided into chunks of `chunk` x `chunk` cells. A chunk's walls are
+    a **pure function of its chunk coordinates and the seed** -- a depth-first
+    backtracker run on that chunk's own random stream -- so a chunk built now
+    and the same chunk built again in an hour are identical, and it does not
+    matter in what order or how often they get built.
+
+    Two things join them up:
+
+    - **Doorways.** Each shared edge gets two, at positions drawn from a stream
+      keyed on the edge itself, so the chunks on either side agree about them
+      without either one having to know the other exists.
+    - **Braiding.** After the doorways are cut, a chunk goes back over its dead
+      ends and opens one more wall on all but one in six of them. That is what
+      turns the tree into a graph with loops in it: with somewhere else to go,
+      the walk is not forced back down its own approach, and the 180-degree
+      turn drops from one tick in fifteen to about one in a hundred and fifty.
+      The ones left in are worth keeping -- walking up to a wall is part of what
+      this saver is, and with loops around it a dead end now costs one cell
+      rather than a retrace of twenty.
+
+    Only the chunks near the camera are kept (`kKeepRadius`); the rest are
+    dropped and rebuilt from the seed if the walk ever comes back. Two
+    consequences worth stating:
+
+    - The **pass counts go with them**, so a chunk revisited after a long
+      absence is unexplored again. That is deliberate -- they are what stops a
+      short loop, and nothing needs them to be remembered for an hour -- and it
+      is deterministic, because what gets dropped depends only on where the
+      walk has been.
+    - The camera walks away from the origin for as long as the clip runs. Over
+      the whole of `kMaxReplaySteps` -- 69 hours of playback -- it gets about
+      450 cells out, where a float32 still resolves 3e-5 of a cell. There is
+      nothing to rebase.
 
     ## Why this one needs replay
 
     Which corridor the camera is in depends on every junction it has already
-    taken. Like 3D Pipes, it is made a pure function of time by
-    `GrowingSaver`: the state at time t is the state reached by replaying from
-    the seed. See Savers.h.
+    taken. Like 3D Pipes, it is made a pure function of time by `GrowingSaver`:
+    the state at time t is the state reached by replaying from the seed. See
+    Savers.h.
 
     A tick is **one cell of travel**, and the alpha inside it slides the camera
     from one cell to the next -- and swings the heading round a corner. That
@@ -25,9 +82,15 @@
     round the corner at a constant rate and reads as a camera on rails rather
     than as walking.
 
+    Generating a chunk draws from **its own** stream, never from the walk's, so
+    the walk replays the same whatever the drawing happened to build. That is
+    the property `idtest --replay` checks and the reason the fog can decide how
+    far the maze is built without changing where the camera goes.
+
     ## The scene controls, in this saver
 
-    - **Complexity** -- the maze, 6..16 cells on a side.
+    - **Complexity** -- the chunk, 6..16 cells on a side. It is now the scale of
+      the maze's structure rather than its size, because it has no size.
     - **Density** -- how often the walk prefers a turn over carrying straight
       on, where both are equally unexplored. Low is long corridors; high is a
       fidget. It cannot buy a retrace: see ChooseHeading.
@@ -35,7 +98,9 @@
       tunnel or a hall.
     - **Fog** -- how far down the corridor you can see. This is the control
       that matters most: a corridor that ends in a hard-edged wall at the far
-      clip plane reads as a bug, and the original faded to black too.
+      clip plane reads as a bug, and the original faded to black too. It also
+      sets how far the maze is built, since there is no point building what the
+      fog hides.
     - **Variation** -- how much the wall colour varies cell to cell, which is
       what stands in for the brick texture.
     - **Length**, **Line Width** -- unused, except the wireframe weight.
@@ -58,14 +123,15 @@
     reads as a wall you have walked up to. The geometry was right the whole
     time; the picture was not.
 
-    It costs a few thousand extra triangles on a maze that was already cheap.
+    ## What gets drawn
 
-    ## The whole maze is drawn every frame
-
-    No culling. At sixteen cells on a side that is at most a few thousand
-    quads, which is nothing, and the alternative -- a visibility test from a
-    camera that is inside the geometry -- is a great deal of code to save
-    bandwidth nobody is short of. The fog hides the far end anyway.
+    The whole maze cannot be drawn any more, so what is drawn is the cells
+    within sight: a disc of radius `DrawRadius` around the camera, which follows
+    the fog, minus everything behind the camera's own plane. That last test is
+    exact rather than a guess -- a cell's geometry reaches 0.75 of a cell from
+    its centre and no perspective projection sees behind its own eye -- so it
+    cannot pop anything into view. It is not a visibility test and does not try
+    to be one; the fog and the walls do the rest.
 */
 namespace idler
 {
@@ -74,6 +140,23 @@ namespace
 /// Cells of travel per second. Slower than Pipes: this is a walking pace, and
 /// the original's was famously unhurried.
 constexpr float kTickRate = 1.6f;
+
+/// How far out, in cells, built maze is kept around the camera. Comfortably
+/// beyond any draw radius below, so a chunk being looked at is never dropped
+/// out from under the drawing.
+constexpr int kKeepRadius = 20;
+
+/// The furthest the maze is ever drawn, in cells. Reached only with the fog
+/// off, where the far clip plane used to be what stopped you seeing forever.
+constexpr int kMaxDrawRadius = 14;
+
+/// Doorways per shared chunk edge. One would connect them; two keeps the seam
+/// from being a bottleneck the walk has to funnel back through.
+constexpr int kDoorsPerEdge = 2;
+
+/// One dead end in this many survives the braid. See the note at the top on
+/// why they are not all removed.
+constexpr int kDeadEndsKept = 6;
 
 /// Wall bits per cell.
 enum Wall
@@ -89,6 +172,32 @@ const int kHeadingDX[ 4 ] = { 0, 1, 0, -1 };
 const int kHeadingDZ[ 4 ] = { -1, 0, 1, 0 };
 const int kHeadingWall[ 4 ] = { kNorth, kEast, kSouth, kWest };
 
+/// Division and remainder that keep going the same way below zero. The maze
+/// runs in every direction from the origin, and C++'s `/` and `%` truncate
+/// toward zero -- which would make the chunk two cells wide at the origin and
+/// mirror the maze about it.
+int FloorDiv( int a, int b )
+{
+	const int q = a / b;
+	return ( a % b != 0 && ( a < 0 ) != ( b < 0 ) ) ? q - 1 : q;
+}
+
+int FloorMod( int a, int b )
+{
+	const int r = a % b;
+	return ( r != 0 && ( r < 0 ) != ( b < 0 ) ) ? r + b : r;
+}
+
+/// One built square of maze, and how often the walk has left each of its cells
+/// along each heading.
+struct Chunk
+{
+	int cx = 0;
+	int cz = 0;
+	std::vector< uint8_t > cells;
+	std::vector< uint32_t > passes;
+};
+
 class Maze : public GrowingSaver
 {
 protected:
@@ -97,23 +206,24 @@ protected:
 	uint64_t GrowthKey( const Settings& s ) const override
 	{
 		return static_cast< uint64_t >( s.seed ) |
-		       ( static_cast< uint64_t >( GridSize( s ) ) << 32 ) |
+		       ( static_cast< uint64_t >( ChunkSize( s ) ) << 32 ) |
 		       ( static_cast< uint64_t >( s.density * 255.0f ) << 40 );
 	}
 
 	void ResetState( const Settings& s, Random& rng ) override
 	{
-		grid = GridSize( s );
-		Generate( rng );
+		chunkSize = ChunkSize( s );
+		seed      = s.seed;
+		chunks.clear();
 
-		// One counter per way out of every cell. Cleared here rather than in
-		// Generate because it belongs to the WALK, not to the maze: a replay
-		// that rebuilt the maze and kept the counts would take different
-		// turnings from a cold run and the frame would not be reproducible.
-		passes.assign( static_cast< size_t >( grid ) * static_cast< size_t >( grid ) * 4U, 0U );
+		// Drawn from the walk's stream so it belongs to the maze rather than to
+		// the frame, exactly as it did when there was one grid to seed.
+		seedForWalls = rng.Next();
 
-		x = rng.Below( grid );
-		z = rng.Below( grid );
+		// The origin, because an endless maze has no middle to start in and no
+		// corner to start from. The seed decides what is there.
+		x = 0;
+		z = 0;
 
 		// The first heading has to be one there is actually a corridor along,
 		// or the walk opens by driving into a wall.
@@ -148,14 +258,16 @@ protected:
 		headingIn = headingOut;
 
 		// Mark the way out before taking it. This is the whole of what stops
-		// the walk retracing itself for ever -- see ChooseHeading.
-		++passes[ Index( x, z ) * 4U + static_cast< size_t >( headingIn ) ];
+		// the walk circling one loop for ever -- see ChooseHeading.
+		MarkPass( x, z, headingIn );
 
 		x += kHeadingDX[ headingIn ];
 		z += kHeadingDZ[ headingIn ];
 
 		const float turnBias = 0.1f + s.density * 0.6f;
 		headingOut           = ChooseHeading( x, z, headingIn, turnBias, rng );
+
+		Forget();
 	}
 
 	void Draw( const Settings& s, float alpha, Scene& scene ) override
@@ -212,16 +324,50 @@ protected:
 		}
 
 		//-------------------------------------------------------------------
-		// The maze itself.
+		// The maze itself: the cells within sight of the camera, built on
+		// demand. See the note at the top on what gets drawn.
 		//-------------------------------------------------------------------
 		const float thickness = cell * 0.06f;
 		const float half      = cell * 0.5f;
 
-		for( int cz = 0; cz < grid; ++cz )
-			for( int cx = 0; cx < grid; ++cx )
+		const int radius = DrawRadius( s, scene, cell );
+
+		// The disc is measured in whole cells rather than in world units, so
+		// the count of what gets drawn is integer arithmetic. The demo is a
+		// hand port checked against this one's triangle count (see
+		// demo/tools/check_geometry.mjs), and a float comparison deciding
+		// whether a cell is in or out is a difference between float32 here and
+		// double there waiting to happen.
+		const int reach = ( radius + 1 ) * ( radius + 1 );
+
+		// A cell's geometry reaches 0.75 of a cell from its centre -- half a
+		// cell each way, plus the wall thickness, corner to corner -- and no
+		// perspective projection sees behind its own eye. So a centre further
+		// back than that cannot contribute a visible triangle, whatever the
+		// field of view is set to.
+		const float behind = -0.8f * cell;
+
+		// One row further out than the disc, because only the north and west
+		// walls of a cell are drawn: the far side of the last row of floor is
+		// the next row's north wall. Every other south or east wall is some
+		// other cell's north or west, and drawing both leaves two coplanar
+		// faces fighting for the same depth.
+		for( int dz = -radius; dz <= radius + 1; ++dz )
+			for( int dx = -radius; dx <= radius + 1; ++dx )
 			{
-				const uint8_t walls = cells[ Index( cx, cz ) ];
-				const Vec3 centre   = CellCentre( cx, cz, cell );
+				if( dx * dx + dz * dz > reach )
+					continue;
+
+				const int cx = x + dx;
+				const int cz = z + dz;
+
+				const Vec3 centre = CellCentre( cx, cz, cell );
+				const Vec3 offset{ centre.x - eye.x, 0.0f, centre.z - eye.z };
+
+				if( Dot( offset, forward ) < behind )
+					continue;
+
+				const uint8_t walls = Walls( cx, cz );
 
 				// Each face takes its shade from the cell hash. This is what
 				// stands in for the brick texture -- see the note at the top.
@@ -229,9 +375,17 @@ protected:
 				                                         static_cast< uint32_t >( cz ), seedForWalls ) ) *
 				                              0.28f * ( 0.2f + s.variation );
 
+				// The colour fan wraps every chunk. There is no total to spread
+				// a hue across when the maze has no end, and a fan that wrapped
+				// on nothing in particular would drift as the camera walked.
+				const int fanX     = FloorMod( cx, chunkSize );
+				const int fanZ     = FloorMod( cz, chunkSize );
+				const int fanIndex = fanX + fanZ * chunkSize;
+				const int fanCount = chunkSize * chunkSize;
+
 				// The classic maze was red brick with a grey floor.
 				const Vec3 brick{ 0.78f * shade, 0.30f * shade, 0.22f * shade };
-				const Vec4 wallColour = s.Colour( brick, cx + cz * grid, grid * grid );
+				const Vec4 wallColour = s.Colour( brick, fanIndex, fanCount );
 
 				const Vec3 mid{ centre.x, height * 0.5f, centre.z };
 				const uint32_t cellKey = Hash2( static_cast< uint32_t >( cx ),
@@ -244,69 +398,167 @@ protected:
 					AddBrickWall( scene.mesh, { mid.x - half, mid.y, mid.z }, { thickness, height * 0.5f, half },
 					              false, wallColour, cellKey ^ 0x22U, s.variation );
 
-				// South and east only on the far edge of the grid: every other
-				// one is some other cell's north or west, and drawing both
-				// leaves two coplanar faces fighting for the same depth.
-				if( ( walls & kSouth ) && cz == grid - 1 )
-					AddBrickWall( scene.mesh, { mid.x, mid.y, mid.z + half }, { half, height * 0.5f, thickness },
-					              true, wallColour, cellKey ^ 0x33U, s.variation );
-				if( ( walls & kEast ) && cx == grid - 1 )
-					AddBrickWall( scene.mesh, { mid.x + half, mid.y, mid.z }, { thickness, height * 0.5f, half },
-					              false, wallColour, cellKey ^ 0x44U, s.variation );
+				// The extra row carries walls only; it has no floor of its own
+				// and drawing one would put a lip beyond the fog.
+				if( dx > radius || dz > radius )
+					continue;
 
 				const Vec3 floorGrey{ 0.28f * shade, 0.28f * shade, 0.30f * shade };
-				const Vec4 floorColour = s.Colour( floorGrey, cx + cz * grid, grid * grid );
+				const Vec4 floorColour = s.Colour( floorGrey, fanIndex, fanCount );
 				scene.mesh.AddBox( { centre.x, -thickness, centre.z }, { half, thickness, half }, floorColour );
 
 				const Vec3 ceilingGrey{ 0.16f * shade, 0.16f * shade, 0.19f * shade };
-				const Vec4 ceilingColour = s.Colour( ceilingGrey, cx + cz * grid, grid * grid );
+				const Vec4 ceilingColour = s.Colour( ceilingGrey, fanIndex, fanCount );
 				scene.mesh.AddBox( { centre.x, height + thickness, centre.z }, { half, thickness, half }, ceilingColour );
 			}
 	}
 
 private:
-	static int GridSize( const Settings& s ) { return 6 + static_cast< int >( s.complexity * 10.0f + 0.5f ); }
+	static int ChunkSize( const Settings& s ) { return 6 + static_cast< int >( s.complexity * 10.0f + 0.5f ); }
 
-	size_t Index( int cx, int cz ) const
+	/// How far out to build and draw, in cells. There is nothing to be gained
+	/// by drawing what the fog has already taken to black, so this follows it;
+	/// with the fog off it is the flat ceiling, which is what stops an endless
+	/// maze being an endless amount of geometry.
+	static int DrawRadius( const Settings& s, const Scene& scene, float cell )
 	{
-		return static_cast< size_t >( cz ) * static_cast< size_t >( grid ) + static_cast< size_t >( cx );
+		const float sight = ( s.fog > 0.001f ) ? scene.fogEnd : static_cast< float >( kMaxDrawRadius ) * cell;
+		const int wanted  = static_cast< int >( sight / cell ) + 2;
+		return std::min( kMaxDrawRadius, std::max( 4, wanted ) );
 	}
 
 	Vec3 CellCentre( int cx, int cz, float cell ) const
 	{
-		const float offset = static_cast< float >( grid ) * cell * 0.5f;
-		return { ( static_cast< float >( cx ) + 0.5f ) * cell - offset, 0.0f,
-		         ( static_cast< float >( cz ) + 0.5f ) * cell - offset };
+		return { ( static_cast< float >( cx ) + 0.5f ) * cell, 0.0f,
+		         ( static_cast< float >( cz ) + 0.5f ) * cell };
+	}
+
+	//-----------------------------------------------------------------------
+	// The chunks.
+	//-----------------------------------------------------------------------
+
+	/// The chunk holding `(cx, cz)`, built if it is not there.
+	///
+	/// The returned reference is good until the next call -- building appends
+	/// to the vector -- which is why every caller below takes what it wants
+	/// from it and does not hold on.
+	Chunk& ChunkFor( int cx, int cz )
+	{
+		const int wantX = FloorDiv( cx, chunkSize );
+		const int wantZ = FloorDiv( cz, chunkSize );
+
+		for( Chunk& c : chunks )
+			if( c.cx == wantX && c.cz == wantZ )
+				return c;
+
+		chunks.push_back( Generate( wantX, wantZ ) );
+		return chunks.back();
+	}
+
+	size_t IndexIn( int cx, int cz ) const
+	{
+		return static_cast< size_t >( FloorMod( cz, chunkSize ) ) * static_cast< size_t >( chunkSize ) +
+		       static_cast< size_t >( FloorMod( cx, chunkSize ) );
+	}
+
+	uint8_t Walls( int cx, int cz ) { return ChunkFor( cx, cz ).cells[ IndexIn( cx, cz ) ]; }
+
+	/// How many times the walk has left `(cx, cz)` along `heading`.
+	uint32_t Passes( int cx, int cz, int heading )
+	{
+		return ChunkFor( cx, cz ).passes[ IndexIn( cx, cz ) * 4U + static_cast< size_t >( heading ) ];
+	}
+
+	void MarkPass( int cx, int cz, int heading )
+	{
+		++ChunkFor( cx, cz ).passes[ IndexIn( cx, cz ) * 4U + static_cast< size_t >( heading ) ];
+	}
+
+	/// Drop the chunks the walk has left behind.
+	///
+	/// What goes depends only on where the camera is, so a replay drops exactly
+	/// what a live run dropped. It has to: the pass counts go with the chunk,
+	/// and they are what the walk steers by.
+	void Forget()
+	{
+		for( size_t i = chunks.size(); i-- > 0; )
+		{
+			const int lowX  = chunks[ i ].cx * chunkSize;
+			const int lowZ  = chunks[ i ].cz * chunkSize;
+			const int highX = lowX + chunkSize - 1;
+			const int highZ = lowZ + chunkSize - 1;
+
+			if( highX < x - kKeepRadius || lowX > x + kKeepRadius ||
+			    highZ < z - kKeepRadius || lowZ > z + kKeepRadius )
+			{
+				chunks[ i ] = chunks.back();
+				chunks.pop_back();
+			}
+		}
 	}
 
 	/**
-	    A perfect maze by depth-first backtracking, with an explicit stack.
+	    The doorways through one shared edge.
 
-	    Recursion would be the obvious way to write it and would blow the stack
-	    on a large grid -- the corridor this carves is a single path that can
+	    Keyed on the **edge** rather than on either chunk, so the two sides
+	    agree without consulting each other: the edge below `(cx, cz)`'s west
+	    side is the edge above `(cx - 1, cz)`'s east side, and both name it
+	    `(cx, cz)`. Get this wrong in either direction and the maze grows a wall
+	    with a door on one face and none on the other, which shows up as the
+	    camera walking through a wall it can still see.
+	*/
+	void EdgeDoors( int cx, int cz, bool vertical, int doors[ kDoorsPerEdge ] ) const
+	{
+		Random rng( Hash3( static_cast< uint32_t >( cx ), static_cast< uint32_t >( cz ),
+		                   seed ^ ( vertical ? 0x5EED1A17U : 0x5EED2B26U ) ) );
+		for( int i = 0; i < kDoorsPerEdge; ++i )
+			doors[ i ] = rng.Below( chunkSize );
+	}
+
+	/**
+	    One chunk of maze: a perfect maze by depth-first backtracking, the
+	    doorways to its four neighbours, then the braid.
+
+	    **Its own random stream.** Nothing here draws from the walk's, because
+	    the walk has to replay identically however many chunks the drawing
+	    happened to build first -- and how many that is depends on the fog,
+	    which is not part of the growth key and must never be.
+
+	    Recursion would be the obvious way to write the carve and would blow the
+	    stack on a large chunk -- the corridor it cuts is a single path that can
 	    reach every cell, so the recursion depth is the cell count.
 	*/
-	void Generate( Random& rng )
+	Chunk Generate( int chunkX, int chunkZ ) const
 	{
-		const size_t total = static_cast< size_t >( grid ) * static_cast< size_t >( grid );
-		cells.assign( total, static_cast< uint8_t >( kNorth | kSouth | kWest | kEast ) );
+		Chunk chunk;
+		chunk.cx = chunkX;
+		chunk.cz = chunkZ;
+
+		const int side     = chunkSize;
+		const size_t total = static_cast< size_t >( side ) * static_cast< size_t >( side );
+		chunk.cells.assign( total, static_cast< uint8_t >( kNorth | kSouth | kWest | kEast ) );
+		chunk.passes.assign( total * 4U, 0U );
+
+		Random rng( Hash3( static_cast< uint32_t >( chunkX ), static_cast< uint32_t >( chunkZ ), seed ) );
+
+		auto at = [ side ]( int cx, int cz ) {
+			return static_cast< size_t >( cz ) * static_cast< size_t >( side ) + static_cast< size_t >( cx );
+		};
 
 		std::vector< uint8_t > visited( total, 0 );
 		std::vector< int > stack;
 		stack.reserve( total );
 
-		seedForWalls = rng.Next();
-
-		int cx = rng.Below( grid );
-		int cz = rng.Below( grid );
-		visited[ Index( cx, cz ) ] = 1;
-		stack.push_back( static_cast< int >( Index( cx, cz ) ) );
+		int cx = rng.Below( side );
+		int cz = rng.Below( side );
+		visited[ at( cx, cz ) ] = 1;
+		stack.push_back( static_cast< int >( at( cx, cz ) ) );
 
 		while( !stack.empty() )
 		{
 			const int here = stack.back();
-			cx             = here % grid;
-			cz             = here / grid;
+			cx             = here % side;
+			cz             = here / side;
 
 			int options[ 4 ];
 			int count = 0;
@@ -314,9 +566,9 @@ private:
 			{
 				const int nx = cx + kHeadingDX[ h ];
 				const int nz = cz + kHeadingDZ[ h ];
-				if( nx < 0 || nz < 0 || nx >= grid || nz >= grid )
+				if( nx < 0 || nz < 0 || nx >= side || nz >= side )
 					continue;
-				if( visited[ Index( nx, nz ) ] )
+				if( visited[ at( nx, nz ) ] )
 					continue;
 				options[ count++ ] = h;
 			}
@@ -332,15 +584,88 @@ private:
 			const int nz = cz + kHeadingDZ[ h ];
 
 			// Knock out both sides of the wall. Removing only one leaves a
-			// corridor you can walk into and not out of, and the walk above
-			// tests the cell it is standing in -- so a one-sided wall shows up
-			// as the camera walking through a wall it can still see.
-			cells[ Index( cx, cz ) ] &= static_cast< uint8_t >( ~kHeadingWall[ h ] );
-			cells[ Index( nx, nz ) ] &= static_cast< uint8_t >( ~kHeadingWall[ ( h + 2 ) % 4 ] );
+			// corridor you can walk into and not out of, and the walk tests the
+			// cell it is standing in -- so a one-sided wall shows up as the
+			// camera walking through a wall it can still see.
+			chunk.cells[ at( cx, cz ) ] &= static_cast< uint8_t >( ~kHeadingWall[ h ] );
+			chunk.cells[ at( nx, nz ) ] &= static_cast< uint8_t >( ~kHeadingWall[ ( h + 2 ) % 4 ] );
 
-			visited[ Index( nx, nz ) ] = 1;
-			stack.push_back( static_cast< int >( Index( nx, nz ) ) );
+			visited[ at( nx, nz ) ] = 1;
+			stack.push_back( static_cast< int >( at( nx, nz ) ) );
 		}
+
+		//-------------------------------------------------------------------
+		// The doorways, which is what makes the chunks one maze rather than a
+		// tiling of separate ones. Each edge is opened from this side only --
+		// the chunk on the other side opens its own half from the same numbers.
+		//-------------------------------------------------------------------
+		int doors[ kDoorsPerEdge ];
+
+		EdgeDoors( chunkX, chunkZ, true, doors );
+		for( int i = 0; i < kDoorsPerEdge; ++i )
+			chunk.cells[ at( 0, doors[ i ] ) ] &= static_cast< uint8_t >( ~kWest );
+
+		EdgeDoors( chunkX + 1, chunkZ, true, doors );
+		for( int i = 0; i < kDoorsPerEdge; ++i )
+			chunk.cells[ at( side - 1, doors[ i ] ) ] &= static_cast< uint8_t >( ~kEast );
+
+		EdgeDoors( chunkX, chunkZ, false, doors );
+		for( int i = 0; i < kDoorsPerEdge; ++i )
+			chunk.cells[ at( doors[ i ], 0 ) ] &= static_cast< uint8_t >( ~kNorth );
+
+		EdgeDoors( chunkX, chunkZ + 1, false, doors );
+		for( int i = 0; i < kDoorsPerEdge; ++i )
+			chunk.cells[ at( doors[ i ], side - 1 ) ] &= static_cast< uint8_t >( ~kSouth );
+
+		//-------------------------------------------------------------------
+		// The braid: open one more wall on most dead ends, which is what turns
+		// the tree into something with loops in it. See the note at the top on
+		// why this matters more than any turning rule can.
+		//
+		// Only interior walls, because opening one on the boundary would need
+		// the agreement of a chunk that may not exist yet. A dead end always
+		// has an interior wall to give: a corner cell has two interior
+		// directions and can only be a dead end if at least one of them is
+		// still shut.
+		//-------------------------------------------------------------------
+		for( int bz = 0; bz < side; ++bz )
+			for( int bx = 0; bx < side; ++bx )
+			{
+				int open = 0;
+				for( int h = 0; h < 4; ++h )
+					if( ( chunk.cells[ at( bx, bz ) ] & kHeadingWall[ h ] ) == 0 )
+						++open;
+				if( open != 1 )
+					continue;
+
+				if( rng.Below( kDeadEndsKept ) == 0 )
+					continue;
+
+				int options[ 4 ];
+				int count = 0;
+				for( int h = 0; h < 4; ++h )
+				{
+					const int nx = bx + kHeadingDX[ h ];
+					const int nz = bz + kHeadingDZ[ h ];
+					if( nx < 0 || nz < 0 || nx >= side || nz >= side )
+						continue;
+					if( ( chunk.cells[ at( bx, bz ) ] & kHeadingWall[ h ] ) == 0 )
+						continue;
+					options[ count++ ] = h;
+				}
+
+				if( count == 0 )
+					continue;
+
+				const int h  = options[ rng.Below( count ) ];
+				const int nx = bx + kHeadingDX[ h ];
+				const int nz = bz + kHeadingDZ[ h ];
+
+				chunk.cells[ at( bx, bz ) ] &= static_cast< uint8_t >( ~kHeadingWall[ h ] );
+				chunk.cells[ at( nx, nz ) ] &= static_cast< uint8_t >( ~kHeadingWall[ ( h + 2 ) % 4 ] );
+			}
+
+		return chunk;
 	}
 
 	/**
@@ -444,12 +769,14 @@ private:
 	}
 
 	/// The first heading out of a cell that has a corridor along it.
-	int FirstOpenHeading( int cx, int cz, Random& rng ) const
+	int FirstOpenHeading( int cx, int cz, Random& rng )
 	{
+		const uint8_t walls = Walls( cx, cz );
+
 		int options[ 4 ];
 		int count = 0;
 		for( int h = 0; h < 4; ++h )
-			if( ( cells[ Index( cx, cz ) ] & kHeadingWall[ h ] ) == 0 )
+			if( ( walls & kHeadingWall[ h ] ) == 0 )
 				options[ count++ ] = h;
 
 		// A perfect maze has no fully walled cell, so `count` is never zero --
@@ -464,36 +791,27 @@ private:
 	    Reversing is a last resort, which is what makes the walk read as
 	    exploring rather than as pacing up and down one corridor.
 
-	    **The choice is made among the exits this walk has used LEAST**, and
-	    that is not a refinement -- it is what stops the walk falling into a
-	    short loop and staying there for the rest of the clip.
+	    **The choice is made among the exits this walk has used LEAST.** With
+	    the maze braided (see Generate) most junctions offer a way round rather
+	    than a way back, and this is what stops the walk taking the same way
+	    round for ever: a loop it has been round once is no longer the least
+	    walked thing on offer, so the next junction sends it somewhere new.
 
-	    A perfect maze is a tree, so it has no cycles to go round; what it has
-	    instead is dead ends, and the way the walk used to bounce off one was
-	    the bug. It turned round, and then at every junction on the way back it
-	    preferred to carry straight on -- which, travelling backwards, is
-	    exactly the corridor it originally came down. So it retraced its
-	    approach perfectly, reached the dead end at the far end of it, turned
-	    round, and retraced again. Escaping needed a turn at a junction, which
-	    is `turnBias` per junction and only 0.1 of one at low Density, so the
-	    camera could ping-pong along the same eight cells for MINUTES. Measured
-	    on the shipped 3D Maze preset, some two-minute stretches saw four cells.
-
-	    Counting how often each exit has been taken fixes it outright, because
-	    the retrace is by definition the exit that has just been used and the
-	    branch it skipped past is the one that has not. Counting **exits**
-	    rather than **cells** matters: with cell counts the walk can sit
-	    between two dead ends bouncing off each in turn -- each bounce makes
-	    the other the less-visited of the two -- and never spend the visit that
-	    would make the third way out the least visited. Per-exit counts cannot
-	    do that, because the bounce spends the count on the way it just went.
+	    Counting **exits** rather than **cells** matters: with cell counts the
+	    walk can sit between two dead ends bouncing off each in turn -- each
+	    bounce makes the other the less-visited of the two -- and never spend
+	    the visit that would make the third way out the least visited. Per-exit
+	    counts cannot do that, because the bounce spends the count on the way it
+	    just went.
 
 	    `turnBias` still decides between exits that are equally unexplored,
 	    which is what it does on fresh ground -- so Density still lengthens the
 	    corridors, it just cannot buy a retrace with them.
 	*/
-	int ChooseHeading( int cx, int cz, int arrived, float turnBias, Random& rng ) const
+	int ChooseHeading( int cx, int cz, int arrived, float turnBias, Random& rng )
 	{
+		const uint8_t walls = Walls( cx, cz );
+
 		int options[ 4 ];
 		int count         = 0;
 		const int reverse = ( arrived + 2 ) % 4;
@@ -503,7 +821,7 @@ private:
 		{
 			if( h == reverse )
 				continue;
-			if( ( cells[ Index( cx, cz ) ] & kHeadingWall[ h ] ) != 0 )
+			if( ( walls & kHeadingWall[ h ] ) != 0 )
 				continue;
 
 			const uint32_t used = Passes( cx, cz, h );
@@ -518,11 +836,11 @@ private:
 
 		if( count == 0 )
 		{
-			// A dead end. Turn round -- and draw a number anyway, so the number
-			// of draws does not depend on the branch taken. A replay that
-			// consumed a different count here would diverge from a live run at
-			// the first dead end, which is the sort of bug that shows up as
-			// "the maze is different after you scrub".
+			// One of the dead ends the braid left in. Turn round -- and draw a
+			// number anyway, so the number of draws does not depend on the
+			// branch taken. A replay that consumed a different count here would
+			// diverge from a live run at the first dead end, which is the sort
+			// of bug that shows up as "the maze is different after you scrub".
 			(void)rng.Next();
 			return reverse;
 		}
@@ -541,21 +859,13 @@ private:
 		return options[ rng.Below( count ) ];
 	}
 
-	/// How many times the walk has left `(cx, cz)` along `heading`.
-	uint32_t Passes( int cx, int cz, int heading ) const
-	{
-		return passes[ Index( cx, cz ) * 4U + static_cast< size_t >( heading ) ];
-	}
+	/// The built maze near the camera, and nothing else. Bounded by `Forget`:
+	/// at the smallest chunk and the widest keep radius this is a few dozen
+	/// chunks of a few hundred bytes, whatever the clock says.
+	std::vector< Chunk > chunks;
 
-	std::vector< uint8_t > cells;
-
-	/// How many times the walk has left each cell along each heading, indexed
-	/// `Index( cx, cz ) * 4 + heading`. Part of the walk's state, so it is
-	/// replayed with it; at most 16x16x4 counters, and a counter cannot pass
-	/// `kMaxReplaySteps`.
-	std::vector< uint32_t > passes;
-
-	int grid = 10;
+	int chunkSize = 10;
+	uint32_t seed = 1;
 
 	int x = 0, z = 0;
 	int previousX = 0, previousZ = 0;
@@ -565,8 +875,8 @@ private:
 	int headingIn  = 0;
 	int headingOut = 0;
 
-	/// Drives the per-cell wall shade. Drawn from the stream at generation
-	/// time so it belongs to the maze rather than to the frame.
+	/// Drives the per-cell wall shade. Drawn from the walk's stream at reset so
+	/// it belongs to the maze rather than to the frame.
 	uint32_t seedForWalls = 0;
 };
 } // namespace

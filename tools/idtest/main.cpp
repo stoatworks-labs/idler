@@ -513,24 +513,39 @@ bool runGeometry( int width, int height )
 }
 
 /**
-    The maze walk has to keep going somewhere.
+    The maze walk has to keep going somewhere, and has to keep finding new maze.
 
-    This is the check for a bug that every other test in here passed. The walk
-    turns round at a dead end, and it used to prefer carrying straight on at
-    each junction on the way back -- which, travelling backwards, is exactly
-    the corridor it arrived down. So it retraced its approach perfectly, hit
-    the dead end at the other end of it, and did it again: the camera
-    ping-ponged along the same handful of cells for minutes at a time. Every
-    frame was correct, the replay was byte-identical, the geometry was valid
-    and the coverage was lit. It just was not going anywhere.
+    This is the check for a bug that every other test in here passed -- twice.
+    Every frame was correct, the replay was byte-identical, the geometry was
+    valid and the coverage was lit. It just was not going anywhere.
 
-    So measure where the camera has BEEN. The eye comes out of the view matrix
-    -- `eye = -R^T t` -- quantises to a cell, and a window of consecutive ticks
-    has to touch more than a handful of distinct ones. Before the fix the worst
-    window here saw three cells; after it, twenty.
+    **The first version of it** was the turning rule. The walk turns round at a
+    dead end, and it used to prefer carrying straight on at each junction on the
+    way back -- which, travelling backwards, is exactly the corridor it arrived
+    down. So it retraced its approach perfectly, hit the dead end at the other
+    end of it, and did it again: the camera ping-ponged along the same handful
+    of cells for minutes. Preferring the least-walked exit fixed that, and the
+    worst window here went from three cells to twenty.
 
-    Sampled a tick apart because a tick is a cell of travel: sampling per frame
-    would count the same cell dozens of times and say nothing.
+    **The second version was the maze**, and this test as first written could
+    not see it. The maze was one grid of at most sixteen cells a side, so the
+    walk roamed it in a minute and then spent the rest of the clip re-walking
+    corridors it had already been down -- which, through fog that shows three
+    cells, is indistinguishable from being stuck. A window floor cannot catch
+    that: a walk pacing a hundred cells passes it comfortably.
+
+    So there are two measurements here.
+
+    - **The window**: a run of consecutive ticks has to touch more than a
+      handful of distinct cells. That is the turning rule.
+    - **The total**: the whole run has to touch more cells than any single grid
+      could ever have held. That is the maze itself, and nothing that generates
+      the maze once can pass it however good its turning rule is.
+
+    Where the camera has been comes out of the view matrix -- `eye = -R^T t` --
+    quantised to a cell. Sampled a tick apart because a tick is a cell of
+    travel: sampling per frame would count the same cell dozens of times and say
+    nothing.
 */
 bool runWalk( int width, int height )
 {
@@ -546,7 +561,7 @@ bool runWalk( int width, int height )
 	const Case cases[] = {
 		{ 0.00f, 0.00f, 0.40f },// the worst case for the old rule
 		{ 0.37f, 0.40f, 0.40f },// the factory 3D Maze preset
-		{ 0.71f, 1.00f, 1.00f },// the largest maze, most fidgety walk
+		{ 0.71f, 1.00f, 1.00f },// the largest chunk, most fidgety walk
 	};
 
 	// A tick is one cell of travel; see Maze.cpp.
@@ -554,6 +569,13 @@ bool runWalk( int width, int height )
 	constexpr int kTicks      = 1200;// 12 minutes of playback
 	constexpr int kWindow     = 100; // ~1 minute
 	constexpr int kFloor      = 12;  // distinct cells that window must touch
+
+	// The old one-grid maze topped out at sixteen cells a side, so 256 cells was
+	// everything it had -- and the walk had seen all of them inside two minutes.
+	// Anything above that is maze that was built as the camera went. The endless
+	// one gets past six hundred here, so this is not a threshold the walk has to
+	// strain for; it is a threshold a finite maze cannot reach at all.
+	constexpr int kEndless = 400;
 
 	Surface surface = makeSurface( width, height );
 
@@ -610,15 +632,21 @@ bool runWalk( int width, int height )
 		std::sort( all.begin(), all.end() );
 		const int seen = static_cast< int >( std::unique( all.begin(), all.end() ) - all.begin() );
 
-		const bool pass = worst >= kFloor;
+		const bool roams   = worst >= kFloor;
+		const bool endless = seen >= kEndless;
+		const bool pass    = roams && endless;
 		printf( "3D Maze  seed %.2f  density %.2f  complexity %.2f   %d cells in %d ticks, "
 		        "worst %d-tick window %d (from tick %d)  %s\n",
 		        static_cast< double >( test.seed ), static_cast< double >( test.density ),
 		        static_cast< double >( test.complexity ), seen, kTicks, kWindow, worst, worstStart,
 		        pass ? "ok" : "FAIL" );
 
-		if( !pass )
+		if( !roams )
 			printf( "    the walk is stuck: fewer than %d distinct cells in a window\n", kFloor );
+		if( !endless )
+			printf( "    the maze is not endless: %d cells in the whole run, under the %d a "
+			        "walk that keeps finding new maze reaches\n",
+			        seen, kEndless );
 
 		ok = ok && pass;
 	}
@@ -1203,7 +1231,7 @@ void usage()
 		"  --geometry        the mesh each saver builds, checked\n"
 		"  --replay          the replay cache does not change the answer\n"
 		"  --coverage        every saver draws something, at several times\n"
-		"  --walk            the maze walk roams rather than pacing a few cells\n"
+		"  --walk            the maze walk roams, and keeps finding new maze\n"
 		"  --speed           a Speed change does not move the picture\n"
 		"  --raster          the software rasteriser agrees with the GL one\n"
 		"  --raster-sheet P  and write a GL-vs-software comparison sheet\n"
