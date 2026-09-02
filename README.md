@@ -46,14 +46,14 @@ repo (`tools/video.cues`), not filmed off a screen.*
 
 ## Download
 
-**[v1.0.7](https://github.com/stoatworks-labs/idler/releases/tag/v1.0.7)** — prebuilt for macOS, Windows and Linux. Pick your platform:
+**[v1.0.8](https://github.com/stoatworks-labs/idler/releases/tag/v1.0.8)** — prebuilt for macOS, Windows and Linux. Pick your platform:
 
 <details>
 <summary><b>macOS</b> — Universal (Apple Silicon + Intel)</summary>
 
 | Build | Download | Size |
 | --- | --- | --- |
-| Universal (Apple Silicon + Intel) · .dmg disk image | [`idler-1.0.7-macos-universal.dmg`](https://github.com/stoatworks-labs/idler/releases/download/v1.0.7/idler-1.0.7-macos-universal.dmg) | 607 KB |
+| Universal (Apple Silicon + Intel) · .dmg disk image | [`idler-1.0.8-macos-universal.dmg`](https://github.com/stoatworks-labs/idler/releases/download/v1.0.8/idler-1.0.8-macos-universal.dmg) | 607 KB |
 | Universal (Apple Silicon + Intel) · .zip archive | [`idler-macos-universal.zip`](https://github.com/stoatworks-labs/idler/releases/latest/download/idler-macos-universal.zip) | 548 KB |
 | Universal (Apple Silicon + Intel) · .zip archive (OpenFX — Resolve, Vegas, Nuke) | [`idler-ofx-macos-universal.zip`](https://github.com/stoatworks-labs/idler/releases/latest/download/idler-ofx-macos-universal.zip) | 353 KB |
 
@@ -64,7 +64,7 @@ repo (`tools/video.cues`), not filmed off a screen.*
 
 | Build | Download | Size |
 | --- | --- | --- |
-| x64 · .exe installer | [`idler-1.0.7-windows-x86_64-setup.exe`](https://github.com/stoatworks-labs/idler/releases/download/v1.0.7/idler-1.0.7-windows-x86_64-setup.exe) | 267 KB |
+| x64 · .exe installer | [`idler-1.0.8-windows-x86_64-setup.exe`](https://github.com/stoatworks-labs/idler/releases/download/v1.0.8/idler-1.0.8-windows-x86_64-setup.exe) | 267 KB |
 | x64 · .zip archive | [`idler-windows-x86_64.zip`](https://github.com/stoatworks-labs/idler/releases/latest/download/idler-windows-x86_64.zip) | 322 KB |
 | x64 · .zip archive (OpenFX — Resolve, Vegas, Nuke) | [`idler-ofx-windows-x86_64.zip`](https://github.com/stoatworks-labs/idler/releases/latest/download/idler-ofx-windows-x86_64.zip) | 128 KB |
 
