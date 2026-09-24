@@ -4208,6 +4208,9 @@ const VARIANT = typeof window === 'undefined'
 
 const mounted = typeof window === 'undefined' ? null : mountDemo({
   name: VARIANT === 'effect' ? 'Idler Mask' : 'Idler',
+  // This page shows ONE of the repo's two plugins (?variant=), so the kit
+  // banner names that one's FFGL type: Idler is the source, Idler Mask the effect.
+  kind: VARIANT === 'effect' ? 'effect' : 'source',
   pluginId: 'ID01',
   tagline: 'The Windows 95/98 screensavers — Mystify, 3D Pipes, 3D Maze and the rest — as an FFGL source and mask for Resolume.',
   repo: 'https://github.com/stoatworks-labs/idler',
