@@ -24,6 +24,22 @@ set -euo pipefail
 
 cd "$( dirname "${BASH_SOURCE[0]}" )/.."
 
+# resolume-ofx-bridge, for ofxprobe. It sits beside this repo's checkout -- and
+# from a git worktree `..` is the worktrees folder, not Projects/resolume, so
+# the main checkout is found through git's common dir as well. IDLER_BRIDGE
+# overrides both.
+BRIDGE="${IDLER_BRIDGE:-}"
+if [[ -z "$BRIDGE" ]]; then
+	for CANDIDATE in "../resolume-ofx-bridge" \
+	                 "$( dirname "$( git rev-parse --path-format=absolute --git-common-dir 2>/dev/null )" )/../resolume-ofx-bridge"; do
+		if [[ -d "$CANDIDATE/build" ]]; then
+			BRIDGE="$CANDIDATE"
+			break
+		fi
+	done
+fi
+BRIDGE="${BRIDGE:-../resolume-ofx-bridge}"
+
 FAST=0
 [[ "${1:-}" == "--fast" ]] && FAST=1
 
@@ -310,7 +326,7 @@ else
 
 	# A real OFX host loading it, if the bridge's probe is built. Not fatal when
 	# it is absent -- it lives in a sibling repo.
-	PROBE="$HOME/Projects/resolume-ofx-bridge/build/ofxprobe"
+	PROBE="$BRIDGE/build/ofxprobe"
 	if [ -x "$PROBE" ]; then
 		if "$PROBE" --dir "$BUILD" --render com.stoatworks.idlermask \
 		            --size 320x180 --out /tmp/idler-ofx.bmp > /dev/null 2>&1; then
