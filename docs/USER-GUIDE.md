@@ -31,9 +31,9 @@ OpenFX plugin for Resolve, Nuke and Natron.
 > compiled: it loads, both plugins register with the right name, uid and category, and all 39
 > controls the host reports match the ones declared — name, order, type, range and default.
 > Still untested: bar sync against a real transport, how the parameter groups land in the
-> inspector, and the OpenFX build in a real OFX host. That release check runs on software
-> rendering and on a machine with no sound device, so it says nothing about a vendor driver or
-> about the audio-driven controls. It has never been used on a live show.
+> inspector, and the OpenFX build anywhere but Resolve's Fusion page. That release check runs
+> on software rendering and on a machine with no sound device, so it says nothing about a vendor
+> driver or about the audio-driven controls. It has never been used on a live show.
 >
 > This codebase was created with AI assistance, directed and reviewed by a human author.
 
@@ -153,6 +153,13 @@ clock started at zero, and Resolume's does not — it hands over a clock reading
 two growing savers past their replay limit on the first frame. The maze looked like a walk stuck in
 one corridor turning on the spot. If you see it, you are on an older build; the plugin's log
 (`~/Library/Logs/idler/`) says `replay capped` when it happens.
+
+**In Resolve's Fusion page, every render fails.** Fixed in v1.0.11. The Fusion page reports the
+frame rate on the effect but not on its clips, and the OpenFX build before it read a clip's rate,
+which failed every frame there. It now takes the effect's rate, so in Fusion the savers run at the
+composition's own rate, and it assumes 24 fps only where a host reports no rate at all. It also
+declares its output as changing every frame, without which Fusion renders the generator once and
+repeats that frame.
 
 ---
 

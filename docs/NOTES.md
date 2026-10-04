@@ -40,7 +40,8 @@ the *picture*, not the pixels: all eleven agree at 100% coverage, mean channel
 error under 0.0006. `--raster-sheet` writes GL beside software, because a number
 agreeing with a number is not evidence that either is a picture. Sync offers
 Free and Manual only (OFX carries no tempo); no audio; `eRenderInstanceSafe`
-because of the replay cache. **Never run in a real OFX host** — only `ofxprobe`.
+because of the replay cache. **The only real OFX host it has run in is Resolve's
+Fusion page** (2026-10-04, the v1.0.11 fixes); otherwise only `ofxprobe`.
 
 **The port was in `main` for a day without shipping**: the release workflow had
 no mention of it, so v0.1.0 went out FFGL-only and the Resolve plugins existed

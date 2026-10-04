@@ -264,7 +264,8 @@ feature wearing the same name), and there is no audio. The render is
 concurrent renders of one instance sharing it would flicker between two network
 lengths; the compositing pass is still threaded.
 
-**It has never run in a real OFX host** — only under `ofxprobe`.
+**The only real OFX host it has run in is Resolve's Fusion page** (2026-10-04, for
+the v1.0.11 fixes above); otherwise only `ofxprobe`.
 
 ## Checking your work
 

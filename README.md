@@ -178,9 +178,12 @@ What that does **not** cover, and you should assume is untested:
   and all 39 controls the host reports match the ones declared — name, order,
   type, range and default. That check runs on software rendering, so it says
   nothing about a vendor driver, and on a machine with no sound device.
-- **The OpenFX build has never run in Resolve, Nuke or Natron.** It loads and
-  renders under `ofxprobe`, a test host, and its software rasteriser is checked
-  against the GL one on all eleven savers — but no real OFX host has seen it.
+- **The OpenFX build has run only on Resolve's Fusion page** (Resolve Studio
+  21.1, 2026-10-04, for v1.0.11's Fusion fixes): both plugins render there in a
+  render job, and the generator's frames move. Never on Resolve's Edit or Color
+  page, in Nuke or in Natron. Otherwise it loads and renders under `ofxprobe`, a
+  test host, and its software rasteriser is checked against the GL one on all
+  eleven savers.
 
 ## Not affiliated with Microsoft
 
