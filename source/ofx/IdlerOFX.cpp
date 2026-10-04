@@ -198,17 +198,17 @@ public:
 	}
 };
 
-/// The frame rate when the host reports none: 24, Resolve's default timeline
-/// rate. Resolve's Fusion page reports no frame rate anywhere.
+/// The frame rate when the host reports none anywhere: 24, Resolve's default
+/// timeline rate.
 constexpr double kFallbackFrameRate = 24.0;
 
 /// OFX time is in frames. This is the first positive, finite frame rate the
 /// host gives -- the output clip's, the source clip's, the effect's -- else
 /// kFallbackFrameRate. Each read is its own try: Resolve's Fusion page gives
-/// kOfxImageEffectPropFrameRate on neither the effect nor any clip, the
-/// Support library throws on a property the host lacks, and a throw out of
-/// render fails the render -- in Fusion, a composition that "could not be
-/// processed successfully".
+/// kOfxImageEffectPropFrameRate on the effect but on no clip, the Support
+/// library throws on a property the host lacks, and a throw out of render
+/// fails the render -- in Fusion, a composition that "could not be processed
+/// successfully". There the effect's rate, the timeline's, is the one used.
 double framesPerSecond( const OFX::ImageEffect& effect, const OFX::Clip* output, const OFX::Clip* source )
 {
 	const auto usable = []( double rate ) { return std::isfinite( rate ) && rate > 0.0; };
@@ -603,7 +603,9 @@ void describeCommon( OFX::ImageEffectDescriptor& desc, const char* label )
 	    "Flying Through Space, Scrolling Marquee, 3D Maze, 3D Pipes, 3D Flying Objects, "
 	    "3D FlowerBox and 3D Text. Every saver is a pure function of time and a seed, so any "
 	    "frame renders on its own and Phase can be keyframed. Not affiliated with Microsoft.\n\n"
-	    "Fusion reports no frame rate; there, time-based controls assume 24 fps." );
+	    "Resolve's Fusion page reports the frame rate on the effect but not on its "
+	    "clips; the plugin reads the effect's, and assumes 24 fps only where a host "
+	    "reports none." );
 
 	desc.addSupportedContext( OFX::eContextGeneral );
 	desc.addSupportedBitDepth( OFX::eBitDepthUByte );
