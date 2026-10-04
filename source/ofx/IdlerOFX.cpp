@@ -198,6 +198,46 @@ public:
 	}
 };
 
+/// The frame rate when the host reports none: 24, Resolve's default timeline
+/// rate. Resolve's Fusion page reports no frame rate anywhere.
+constexpr double kFallbackFrameRate = 24.0;
+
+/// OFX time is in frames. This is the first positive, finite frame rate the
+/// host gives -- the output clip's, the source clip's, the effect's -- else
+/// kFallbackFrameRate. Each read is its own try: Resolve's Fusion page gives
+/// kOfxImageEffectPropFrameRate on neither the effect nor any clip, the
+/// Support library throws on a property the host lacks, and a throw out of
+/// render fails the render -- in Fusion, a composition that "could not be
+/// processed successfully".
+double framesPerSecond( const OFX::ImageEffect& effect, const OFX::Clip* output, const OFX::Clip* source )
+{
+	const auto usable = []( double rate ) { return std::isfinite( rate ) && rate > 0.0; };
+	for( const OFX::Clip* clip : { output, source } )
+	{
+		if( clip == nullptr )
+			continue;
+		try
+		{
+			const double rate = clip->getFrameRate();
+			if( usable( rate ) )
+				return rate;
+		}
+		catch( ... )
+		{
+		}
+	}
+	try
+	{
+		const double rate = effect.getFrameRate();
+		if( usable( rate ) )
+			return rate;
+	}
+	catch( ... )
+	{
+	}
+	return kFallbackFrameRate;
+}
+
 //---------------------------------------------------------------------------
 // The plugin
 //---------------------------------------------------------------------------
@@ -382,7 +422,7 @@ void IdlerOFXPlugin::render( const OFX::RenderArguments& args )
 	// keyframe Speed, so an anchor here would make a frame depend on which
 	// frames happened to be rendered before it. A pure product is the right
 	// answer for a timeline; see Idler.h.
-	const double fps      = dstClip->getFrameRate() > 0.0 ? dstClip->getFrameRate() : 25.0;
+	const double fps      = framesPerSecond( *this, dstClip, srcClip );
 	const float seconds   = static_cast< float >( args.time / fps );
 	const int syncMode    = Option( params[ PT_SYNC ], 2 );
 	const float phaseSecs = PhaseFromParam( params[ PT_PHASE ] );
@@ -545,7 +585,8 @@ void describeCommon( OFX::ImageEffectDescriptor& desc, const char* label )
 	    "The Windows 95/98 screensavers — Mystify, Beziers, Curves and Colors, Flying Windows, "
 	    "Flying Through Space, Scrolling Marquee, 3D Maze, 3D Pipes, 3D Flying Objects, "
 	    "3D FlowerBox and 3D Text. Every saver is a pure function of time and a seed, so any "
-	    "frame renders on its own and Phase can be keyframed. Not affiliated with Microsoft." );
+	    "frame renders on its own and Phase can be keyframed. Not affiliated with Microsoft.\n\n"
+	    "Fusion reports no frame rate; there, time-based controls assume 24 fps." );
 
 	desc.addSupportedContext( OFX::eContextGeneral );
 	desc.addSupportedBitDepth( OFX::eBitDepthUByte );

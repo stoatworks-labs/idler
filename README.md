@@ -143,6 +143,13 @@ themselves are the same code, and `idtest --raster` checks the two renderers
 against each other. Sync there offers Free and Manual only, because OFX carries
 no tempo — Phase is the thing to keyframe.
 
+**Fusion reports no frame rate; there, time-based controls assume 24 fps.**
+Resolve's Fusion page gives an OpenFX plugin no frame rate at all, and the first
+OpenFX builds failed every render there. Now Idler falls back to 24, Resolve's
+default timeline rate, so in Fusion the savers run as if the composition were 24 fps
+whatever its real rate. A host that reports a rate, Resolve's Edit page included,
+gets its own.
+
 ## Status
 
 Verified offline by `tools/verify.sh`, which runs:
