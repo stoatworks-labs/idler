@@ -1,20 +1,21 @@
 # idler
 
 > **AI-assisted project.** This codebase was created with [Claude](https://claude.com/claude-code)
-> (Anthropic), directed and reviewed by a human author. Every saver is verified
+> (Anthropic), directed and reviewed by a human author. Every saver is checked
 > by an offline harness that drives the real plugin class in a headless GL
 > context: it renders frames and checks the mesh each saver builds, that every
 > saver draws at five different times including zero, that no control is dead,
-> and — for the two savers that grow — that a frame reached by replaying the
+> and (for the two savers that grow) that a frame reached by replaying the
 > clock is **byte-identical** to the same frame rendered cold (see
-> [Status](#status)). Both plugins have been loaded into Resolume and run by the
-> author; what has *not* been checked there is listed under
-> [Status](#status). Check it in your own rig before trusting it in a show.
+> [Status](#status)). I've loaded both plugins into Resolume and run them; what
+> *hasn't* been checked there is listed under [Status](#status). Check it in
+> your own rig before you trust it in a show.
 
 The Windows 95/98 screensaver suite, rebuilt as a generator for Resolume
-Arena/Avenue.
+Arena/Avenue, for every show that's ever wanted to look like an unattended
+office PC in 1998.
 
-Eleven savers in one plugin — the flat ones that shipped with Windows and the
+Eleven savers in one plugin, the flat ones that shipped with Windows and the
 OpenGL ones that came with Plus! and became stock in 98:
 
 | | |
@@ -31,16 +32,16 @@ OpenGL ones that came with Plus! and became stock in 98:
 | **3D FlowerBox** | A polyhedron morphing on the spot |
 | **3D Text** | Extruded lettering, turning |
 
-Ships as two plugins: **Idler**, a source, and **Idler Mask**, an effect that
-draws the saver over the incoming clip — or reveals, hides or tints the clip
+It ships as two plugins: **Idler**, a source, and **Idler Mask**, an effect that
+draws the saver over the incoming clip, or reveals, hides or tints the clip
 through it.
 
 [![Idler — the Windows 95/98 screensavers, rebuilt for Resolume](docs/video-thumb.png)](https://www.youtube.com/watch?v=r_ZPnHM8-NY)
 
-*[Watch the tour](https://www.youtube.com/watch?v=r_ZPnHM8-NY) — 58 seconds, all
-eleven savers. Every frame is the real plugin: an FFGL plugin has no window, so
-the footage is rendered by the plugin's own harness from a cue sheet in this
-repo (`tools/video.cues`), not filmed off a screen.*
+*[Watch the tour](https://www.youtube.com/watch?v=r_ZPnHM8-NY) (58 seconds, all
+eleven savers). It's all the real plugin. An FFGL plugin doesn't have a window to
+film, so the footage is rendered by the plugin's own harness from a cue sheet in
+this repo (`tools/video.cues`) rather than filmed off a screen.*
 
 <!-- downloads:start -->
 
@@ -88,19 +89,19 @@ macOS builds are signed and notarised and open normally. The Windows builds are 
 ## Why it is not just nostalgia
 
 Every saver is a **pure function of (time, seed)**. Nothing integrates a
-velocity, nothing remembers the previous frame.
+velocity, and nothing remembers the previous frame.
 
-That is not a purist's flourish — it is what makes the plugin usable in a show:
+That's what makes the plugin usable in a show:
 
-- **It cannot drift.** Resolume's frame rate drops when the show gets heavy. A
-  saver that slowed down under load would come apart from the music.
+- **It can't drift.** Resolume's frame rate drops when the show gets heavy, and
+  a saver that slowed down under load would come apart from the music.
 - **Beat sync is free.** Time is just a number, so handing it the host's bar
   position locks the animation with no second code path.
 - **Phase is scrubbable and keyframable.** Drag it and the picture goes where
-  you dragged it, including for 3D Pipes — the network grows to wherever you
+  you dragged it, including for 3D Pipes: the network grows to wherever you
   put the slider.
 
-The two savers that genuinely grow — Pipes and Maze — get there by
+The two savers that really do grow, Pipes and Maze, get there by
 **deterministic replay** from the seed, so the same composition builds the same
 pipe network on the show laptop and the rack machine.
 
@@ -108,18 +109,18 @@ pipe network on the show laptop and the rack machine.
 
 Eleven savers share one parameter list: seven generic scene controls (Density,
 Complexity, Size, Length, Line Width, Variation, Shading) that each saver maps
-to whatever it has that is analogous, plus motion, camera, colour and the
+to whatever it has that's analogous, plus motion, camera, colour and the
 Mask/Mix output pair.
 
 **Start from a preset.** The first eleven presets are each saver set up the way
-it actually ran — picking a saver from the dropdown alone gives you that saver
-driven by whatever the sliders happen to say, which is often not what it looked
+it actually ran. Picking a saver from the dropdown alone gives you that saver
+driven by whatever the sliders happen to say, which often isn't what it looked
 like on the machine. The remaining presets are looks that were never on
 anybody's monitor: a wireframe maze over transparency, a hyperspace starfield,
 pipes as a tinted overlay.
 
-Colour Mode is worth knowing: **Classic** is each saver's own palette as it was;
-**Tint**, **Spread** and **Cycle** put the whole suite under one colour scheme,
+Colour Mode is worth knowing about: **Classic** is each saver's own palette as it
+was, and **Tint**, **Spread** and **Cycle** put the whole suite under one colour scheme,
 which is what makes any of it usable behind a band.
 
 ## Building
@@ -135,47 +136,47 @@ cmake --install build        # into ~/Documents/Resolume Arena/Extra Effects
 macOS builds universal (arm64 + x86_64) by default. Windows needs vcpkg for
 GLEW; the manifest is in `vcpkg.json`.
 
-From v0.1.1 the release also ships **`Idler.ofx.bundle`** — the same eleven savers as OpenFX
+From v0.1.1 the release also ships **`Idler.ofx.bundle`**: the same eleven savers as OpenFX
 plugins for DaVinci Resolve, Nuke and Natron, a generator and a matching filter
 in one bundle. Copy it into `/Library/OFX/Plugins`. An OFX host hands a plugin a
 buffer rather than a GL context, so that build rasterises in software; the savers
 themselves are the same code, and `idtest --raster` checks the two renderers
 against each other. Sync there offers Free and Manual only, because OFX carries
-no tempo — Phase is the thing to keyframe.
+no tempo, so Phase is the thing to keyframe.
 
 **Resolve's Fusion page reports the frame rate on the effect but not on its clips.**
 The first OpenFX builds read a clip's rate, which Fusion leaves out, and failed
 every render there. Now Idler asks the output clip, the source clip and then the
 effect, so in Fusion the savers run at the timeline's own rate (checked at 24 and 25
-fps). It assumes 24 fps, Resolve's default timeline rate, only where a host reports
+fps). It only assumes 24 fps, Resolve's default timeline rate, where a host reports
 no rate at all.
 
 ## Status
 
-Verified offline by `tools/verify.sh`, which runs:
+Checked offline by `tools/verify.sh`, which runs:
 
 - **universal build**, `plugMain` exported, `CFBundleExecutable` correct, and an
-  ad-hoc codesign — the same checks the release workflow does, run locally where
-  they are cheap
-- **geometry** — the mesh each saver builds: triangle counts, bounding boxes,
+  ad-hoc codesign: the same checks the release workflow does, run locally where
+  they're cheap
+- **geometry**: the mesh each saver builds: triangle counts, bounding boxes,
   indices in range, every normal unit length
-- **coverage** — all eleven savers emit geometry that lands on the frame, at
+- **coverage**: all eleven savers emit geometry that lands on the frame, at
   five times including zero
-- **replay** — a frame rendered cold and the same frame reached by running the
+- **replay**: a frame rendered cold and the same frame reached by running the
   clock up to it are byte-identical, for all eleven
-- **sweep** — 64 control/context pairs, none dead
+- **sweep**: 64 control/context pairs, none dead
 
 Both plugins have been **loaded into Resolume and run**, and all eleven savers
 render there.
 
-What that does **not** cover, and you should assume is untested:
+What that **doesn't** cover, and you should assume is untested:
 
-- **Bar sync has not been checked against a real transport**, and how the
-  parameter groups land in the inspector has not been reviewed.
-- **It has never been used on a live show.**
+- **Bar sync hasn't been checked against a real transport**, and I haven't
+  reviewed how the parameter groups land in the inspector.
+- **It's never been used on a live show.**
 - **The Windows build is loaded into a real Arena 7.27.1 at every release**, not
   only compiled: both plugins register with the right name, uid and category,
-  and all 39 controls the host reports match the ones declared — name, order,
+  and all 39 controls the host reports match the ones declared: name, order,
   type, range and default. That check runs on software rendering, so it says
   nothing about a vendor driver, and on a machine with no sound device.
 - **The OpenFX build has run only on Resolve's Fusion page** (Resolve Studio
