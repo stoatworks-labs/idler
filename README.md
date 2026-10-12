@@ -169,16 +169,17 @@ Checked offline by `tools/verify.sh`, which runs:
 Both plugins have been **loaded into Resolume and run**, and all eleven savers
 render there.
 
+**The Windows build is loaded into a real Arena 7.27.1 at every release**, not
+only compiled: both plugins register with the right name, uid and category,
+and all 39 controls the host reports match the ones declared: name, order,
+type, range and default. That check runs on software rendering, so it says
+nothing about a vendor driver, and on a machine with no sound device.
+
 What that **doesn't** cover, and you should assume is untested:
 
 - **Bar sync hasn't been checked against a real transport**, and I haven't
   reviewed how the parameter groups land in the inspector.
 - **It's never been used on a live show.**
-- **The Windows build is loaded into a real Arena 7.27.1 at every release**, not
-  only compiled: both plugins register with the right name, uid and category,
-  and all 39 controls the host reports match the ones declared: name, order,
-  type, range and default. That check runs on software rendering, so it says
-  nothing about a vendor driver, and on a machine with no sound device.
 - **The OpenFX build has run only on Resolve's Fusion page** (Resolve Studio
   21.1, 2026-10-04, for v1.0.11's Fusion fixes): both plugins render there in a
   render job, and the generator's frames move. Never on Resolve's Edit or Color
